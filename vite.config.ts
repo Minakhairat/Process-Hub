@@ -12,9 +12,17 @@ export default defineConfig(() => {
       tailwindcss(),
       VitePWA({
         registerType: 'autoUpdate',
-        includeAssets: ['icon.svg', 'apple-touch-icon.png', 'pwa-192x192.png', 'pwa-512x512.png', 'pwa-maskable-512x512.png'],
+        filename: 'fresh-ops-sw.js',
+        manifestFilename: 'fresh-ops.webmanifest',
+        includeAssets: [
+          'icon.svg',
+          'fresh-ops-apple-180.png',
+          'fresh-ops-192.png',
+          'fresh-ops-512.png',
+          'fresh-ops-maskable-512.png',
+        ],
         manifest: {
-          id: './',
+          id: './?app=fresh-electric-ops',
           name: 'إدارة العمليات — مصنع المبرد الصحراوي والميكروويف | فريش إليكتريك',
           short_name: 'Fresh Ops',
           description: 'المنصة الموحدة لإدارة العمليات والتصنيع الرشيق بمصنع المبرد الصحراوي والميكروويف — شركة فريش إليكتريك للأجهزة المنزلية.',
@@ -22,25 +30,25 @@ export default defineConfig(() => {
           background_color: '#FAFAF9',
           display: 'standalone',
           orientation: 'any',
-          start_url: './',
+          start_url: './?app=fresh-electric-ops',
           scope: './',
           dir: 'rtl',
           lang: 'ar',
           icons: [
             {
-              src: 'pwa-192x192.png',
+              src: 'fresh-ops-192.png',
               sizes: '192x192',
               type: 'image/png',
               purpose: 'any',
             },
             {
-              src: 'pwa-512x512.png',
+              src: 'fresh-ops-512.png',
               sizes: '512x512',
               type: 'image/png',
               purpose: 'any',
             },
             {
-              src: 'pwa-maskable-512x512.png',
+              src: 'fresh-ops-maskable-512.png',
               sizes: '512x512',
               type: 'image/png',
               purpose: 'maskable',
@@ -48,6 +56,8 @@ export default defineConfig(() => {
           ],
         },
         workbox: {
+          cacheId: 'fresh-electric-ops-hub',
+          cleanupOutdatedCaches: true,
           maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
           globPatterns: ['**/*.{js,css,html,ico,png,svg,jpg,woff,woff2}'],
           runtimeCaching: [
@@ -55,7 +65,7 @@ export default defineConfig(() => {
               urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
               handler: 'CacheFirst',
               options: {
-                cacheName: 'google-fonts-cache',
+                cacheName: 'fresh-ops-google-fonts-cache',
                 expiration: {
                   maxEntries: 10,
                   maxAgeSeconds: 60 * 60 * 24 * 365,
@@ -69,7 +79,7 @@ export default defineConfig(() => {
               urlPattern: /^https:\/\/fonts\.gstatic\.com\/.*/i,
               handler: 'CacheFirst',
               options: {
-                cacheName: 'gstatic-fonts-cache',
+                cacheName: 'fresh-ops-gstatic-fonts-cache',
                 expiration: {
                   maxEntries: 10,
                   maxAgeSeconds: 60 * 60 * 24 * 365,
