@@ -1,0 +1,300 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // Global Hardened Helpers
+    // -------------------------------------------------------------------------
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    // Pure token-based admin check (safe for allow list queries - zero get/exists calls)
+    function isBootstrappedAdmin() {
+      return isVerifiedUser() && request.auth.token.email == 'minakhairat1@gmail.com';
+    }
+
+    // Full admin check for single-doc get and write operations
+    function isAdmin() {
+      return isBootstrappedAdmin() || (
+        isVerifiedUser() && exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isOwner(userId) {
+      return isVerifiedUser() && request.auth.uid == userId;
+    }
+
+    // -------------------------------------------------------------------------
+    // Entity Validation Helpers (Blueprint-Synchronized)
+    // -------------------------------------------------------------------------
+    function isValidAppItem(data) {
+      return data.keys().hasAll([
+        'id', 'title', 'titleAr', 'description', 'url', 'category',
+        'iconType', 'iconName', 'iconUrl', 'accentColor', 'order',
+        'isActive', 'featured', 'createdBy', 'createdAt', 'updatedAt'
+      ])
+      && data.keys().hasOnly([
+        'id', 'title', 'titleAr', 'description', 'url', 'category',
+        'iconType', 'iconName', 'iconUrl', 'accentColor', 'order',
+        'isActive', 'featured', 'createdBy', 'createdAt', 'updatedAt'
+      ])
+      && isValidId(data.id)
+      && data.id.size() >= 2 && data.id.size() <= 64
+      && data.title is string && data.title.size() >= 2 && data.title.size() <= 100
+      && data.titleAr is string && data.titleAr.size() >= 2 && data.titleAr.size() <= 120
+      && data.description is string && data.description.size() >= 4 && data.description.size() <= 400
+      && data.url is string && data.url.size() >= 8 && data.url.size() <= 500
+      && data.url.matches('^https?://.+')
+      && data.category in ['lean', 'quality', 'production', 'training', 'ai', 'other']
+      && data.iconType in ['lucide', 'image']
+      && data.iconName is string && data.iconName.size() >= 1 && data.iconName.size() <= 60
+      && data.iconUrl is string && data.iconUrl.size() <= 1000
+      && data.accentColor in ['red', 'blue', 'emerald', 'amber', 'indigo', 'rose', 'slate']
+      && data.order is int && data.order >= 0 && data.order <= 10000
+      && data.isActive is bool
+      && data.featured is bool
+      && isValidId(data.createdBy)
+      && data.createdAt is timestamp
+      && data.updatedAt is timestamp;
+    }
+
+    function isValidUserProfile(data) {
+      return data.keys().hasAll([
+        'uid', 'email', 'displayName', 'phone', 'jobTitle', 'company',
+        'photoURL', 'role', 'notificationsEnabled', 'platformInfo',
+        'totalLaunches', 'lastActiveAt', 'createdAt'
+      ])
+      && data.keys().hasOnly([
+        'uid', 'email', 'displayName', 'phone', 'jobTitle', 'company',
+        'photoURL', 'role', 'notificationsEnabled', 'platformInfo',
+        'totalLaunches', 'lastActiveAt', 'createdAt'
+      ])
+      && isValidId(data.uid)
+      && data.email is string && data.email.size() >= 3 && data.email.size() <= 150
+      && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100
+      && data.phone is string && data.phone.size() <= 30
+      && data.jobTitle is string && data.jobTitle.size() <= 100
+      && data.company is string && data.company.size() <= 100
+      && data.photoURL is string && data.photoURL.size() <= 500
+      && data.role in ['user', 'admin']
+      && data.notificationsEnabled is bool
+      && data.platformInfo is string && data.platformInfo.size() <= 100
+      && data.totalLaunches is int && data.totalLaunches >= 0 && data.totalLaunches <= 10000000
+      && data.lastActiveAt is timestamp
+      && data.createdAt is timestamp;
+    }
+
+    function isValidReadReceipt(data) {
+      return data.keys().hasAll(['notificationId', 'readAt'])
+      && data.keys().hasOnly(['notificationId', 'readAt'])
+      && isValidId(data.notificationId)
+      && data.notificationId.size() <= 64
+      && data.readAt is timestamp;
+    }
+
+    function isValidBroadcastNotification(data) {
+      return data.keys().hasAll([
+        'id', 'title', 'body', 'type', 'targetAppUrl',
+        'targetAppTitle', 'senderName', 'isActive', 'createdAt'
+      ])
+      && data.keys().hasOnly([
+        'id', 'title', 'body', 'type', 'targetAppUrl',
+        'targetAppTitle', 'senderName', 'isActive', 'createdAt'
+      ])
+      && isValidId(data.id)
+      && data.id.size() >= 2 && data.id.size() <= 64
+      && data.title is string && data.title.size() >= 2 && data.title.size() <= 120
+      && data.body is string && data.body.size() >= 2 && data.body.size() <= 1000
+      && data.type in ['announcement', 'new_app', 'update', 'urgent']
+      && data.targetAppUrl is string && data.targetAppUrl.size() <= 500
+      && data.targetAppTitle is string && data.targetAppTitle.size() <= 100
+      && data.senderName is string && data.senderName.size() >= 2 && data.senderName.size() <= 100
+      && data.isActive is bool
+      && data.createdAt is timestamp;
+    }
+
+    function isValidActivityLog(data) {
+      return data.keys().hasAll([
+        'userId', 'userEmail', 'userName', 'appId',
+        'appTitle', 'deviceType', 'createdAt'
+      ])
+      && data.keys().hasOnly([
+        'userId', 'userEmail', 'userName', 'appId',
+        'appTitle', 'deviceType', 'createdAt'
+      ])
+      && isValidId(data.userId)
+      && data.userEmail is string && data.userEmail.size() >= 3 && data.userEmail.size() <= 150
+      && data.userName is string && data.userName.size() >= 1 && data.userName.size() <= 100
+      && isValidId(data.appId)
+      && data.appId.size() <= 64
+      && data.appTitle is string && data.appTitle.size() >= 1 && data.appTitle.size() <= 100
+      && data.deviceType is string && data.deviceType.size() >= 1 && data.deviceType.size() <= 60
+      && data.createdAt is timestamp;
+    }
+
+    // -------------------------------------------------------------------------
+    // Collection Rules
+    // -------------------------------------------------------------------------
+
+    // 1. Applications Catalog (/apps/{appId})
+    match /apps/{appId} {
+      allow get: if isValidId(appId) && (resource.data.isActive == true || isAdmin());
+      allow list: if resource.data.isActive == true || isBootstrappedAdmin();
+
+      allow create: if isAdmin()
+        && isValidId(appId)
+        && isValidAppItem(incoming())
+        && incoming().id == appId
+        && incoming().createdBy == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isAdmin()
+        && isValidId(appId)
+        && isValidAppItem(incoming())
+        && incoming().id == existing().id
+        && incoming().createdBy == existing().createdBy
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'title', 'titleAr', 'description', 'url', 'category',
+          'iconType', 'iconName', 'iconUrl', 'accentColor', 'order',
+          'isActive', 'featured', 'updatedAt'
+        ]);
+
+      allow delete: if isAdmin() && isValidId(appId);
+    }
+
+    // 2. Users Collection (/users/{userId}) - Strict PII Isolation
+    match /users/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isBootstrappedAdmin();
+
+      allow create: if isOwner(userId)
+        && isValidId(userId)
+        && isValidUserProfile(incoming())
+        && incoming().uid == request.auth.uid
+        && (incoming().role == 'user' || (isBootstrappedAdmin() && incoming().role == 'admin'))
+        && incoming().totalLaunches == 0
+        && incoming().createdAt == request.time
+        && incoming().lastActiveAt == request.time;
+
+      allow update: if isValidId(userId)
+        && isVerifiedUser()
+        && isValidUserProfile(incoming())
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().lastActiveAt == request.time
+        && (
+          (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly([
+            'displayName', 'phone', 'jobTitle', 'company', 'photoURL',
+            'role', 'notificationsEnabled', 'platformInfo', 'totalLaunches', 'lastActiveAt'
+          ]))
+          ||
+          (isOwner(userId)
+            && incoming().role == existing().role
+            && incoming().email == existing().email
+            && (
+              (incoming().diff(existing()).affectedKeys().hasOnly([
+                'displayName', 'phone', 'jobTitle', 'company', 'photoURL',
+                'notificationsEnabled', 'platformInfo', 'lastActiveAt'
+              ]))
+              ||
+              (incoming().diff(existing()).affectedKeys().hasOnly([
+                'totalLaunches', 'platformInfo', 'lastActiveAt'
+              ]) && incoming().totalLaunches == existing().totalLaunches + 1)
+            )
+          )
+        );
+
+      allow delete: if isAdmin() && isValidId(userId);
+
+      // Master Gate Subcollection: Read Notification Receipts
+      match /readNotifications/{notificationId} {
+        allow get: if isValidId(userId) && isValidId(notificationId)
+          && (isOwner(userId) || isAdmin())
+          && exists(/databases/$(database)/documents/users/$(userId));
+
+        allow list: if isValidId(userId)
+          && (isOwner(userId) || isBootstrappedAdmin());
+
+        allow create: if isValidId(userId) && isValidId(notificationId)
+          && isOwner(userId)
+          && exists(/databases/$(database)/documents/users/$(userId))
+          && isValidReadReceipt(incoming())
+          && incoming().notificationId == notificationId
+          && incoming().readAt == request.time;
+
+        allow update: if false;
+        allow delete: if isValidId(userId) && isValidId(notificationId) && (isOwner(userId) || isAdmin());
+      }
+    }
+
+    // 3. Broadcast Notifications (/notifications/{notificationId})
+    match /notifications/{notificationId} {
+      allow get: if isValidId(notificationId) && isVerifiedUser() && (resource.data.isActive == true || isAdmin());
+      allow list: if isVerifiedUser() && (resource.data.isActive == true || isBootstrappedAdmin());
+
+      allow create: if isAdmin()
+        && isValidId(notificationId)
+        && isValidBroadcastNotification(incoming())
+        && incoming().id == notificationId
+        && incoming().createdAt == request.time;
+
+      allow update: if isAdmin()
+        && isValidId(notificationId)
+        && isValidBroadcastNotification(incoming())
+        && incoming().id == existing().id
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'title', 'body', 'type', 'targetAppUrl', 'targetAppTitle', 'isActive'
+        ]);
+
+      allow delete: if isAdmin() && isValidId(notificationId);
+    }
+
+    // 4. Activity Logs (/activityLogs/{logId})
+    match /activityLogs/{logId} {
+      allow get: if isValidId(logId) && isVerifiedUser() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow list: if isVerifiedUser() && (resource.data.userId == request.auth.uid || isBootstrappedAdmin());
+
+      allow create: if isVerifiedUser()
+        && isValidId(logId)
+        && isValidActivityLog(incoming())
+        && incoming().userId == request.auth.uid
+        && incoming().createdAt == request.time;
+
+      allow update: if false;
+      allow delete: if isAdmin() && isValidId(logId);
+    }
+
+    // 5. Admins Registry (/admins/{adminId})
+    match /admins/{adminId} {
+      allow get: if isValidId(adminId) && isVerifiedUser() && (request.auth.uid == adminId || isAdmin());
+      allow list, create, update, delete: if false;
+    }
+  }
+}

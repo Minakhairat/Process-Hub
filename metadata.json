@@ -1,0 +1,8 @@
+{
+  "name": "Mina Khairat Engineering Hub",
+  "description": "المنصة الموحدة لتطبيقات الهندسة الصناعية واللين سيجما وإدارة الجودة — إعداد المهندس مينا خيرت.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

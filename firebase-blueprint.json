@@ -1,0 +1,354 @@
+{
+  "entities": {
+    "AppItem": {
+      "title": "AppItem",
+      "description": "A Lean, Six Sigma, or Industrial Engineering web application listed on the unified platform.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Unique identifier slug for the application."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100,
+          "description": "Display title of the application."
+        },
+        "titleAr": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120,
+          "description": "Arabic subtitle or localized name."
+        },
+        "description": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 400,
+          "description": "Concise explanation of what the tool does."
+        },
+        "url": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 500,
+          "pattern": "^https?://.+",
+          "description": "Destination HTTPS URL for the web app."
+        },
+        "category": {
+          "type": "string",
+          "enum": ["lean", "quality", "production", "training", "ai", "other"],
+          "description": "Functional engineering category."
+        },
+        "iconType": {
+          "type": "string",
+          "enum": ["lucide", "image"],
+          "description": "Whether the card uses a built-in Lucide vector icon or custom image URL."
+        },
+        "iconName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60,
+          "description": "Name of the Lucide icon component."
+        },
+        "iconUrl": {
+          "type": "string",
+          "maxLength": 1000,
+          "description": "Optional custom icon URL when iconType is image."
+        },
+        "accentColor": {
+          "type": "string",
+          "enum": ["red", "blue", "emerald", "amber", "indigo", "rose", "slate"],
+          "description": "Visual accent color token for the app icon container."
+        },
+        "order": {
+          "type": "integer",
+          "description": "Sort order priority in the platform grid."
+        },
+        "isActive": {
+          "type": "boolean",
+          "description": "Whether the app is visible to general users."
+        },
+        "featured": {
+          "type": "boolean",
+          "description": "Whether the app is highlighted as a core tool."
+        },
+        "createdBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "UID of the administrator who created the entry."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of creation."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update."
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "titleAr",
+        "description",
+        "url",
+        "category",
+        "iconType",
+        "iconName",
+        "iconUrl",
+        "accentColor",
+        "order",
+        "isActive",
+        "featured",
+        "createdBy",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Authenticated user account and profile metadata with strict PII isolation.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Auth user UID."
+        },
+        "email": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 150,
+          "description": "Verified user email address."
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "User full name."
+        },
+        "phone": {
+          "type": "string",
+          "maxLength": 30,
+          "description": "Optional user phone number."
+        },
+        "jobTitle": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "User role or engineering title."
+        },
+        "company": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "User organization or factory name."
+        },
+        "photoURL": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Profile avatar URL."
+        },
+        "role": {
+          "type": "string",
+          "enum": ["user", "admin"],
+          "description": "Access role; self-registration is strictly restricted to user."
+        },
+        "notificationsEnabled": {
+          "type": "boolean",
+          "description": "User preference for OS/browser push notifications."
+        },
+        "platformInfo": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Detected operating system and device category."
+        },
+        "totalLaunches": {
+          "type": "integer",
+          "description": "Count of tool launches recorded by this user."
+        },
+        "lastActiveAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of latest session activity."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when user profile was first created."
+        }
+      },
+      "required": [
+        "uid",
+        "email",
+        "displayName",
+        "phone",
+        "jobTitle",
+        "company",
+        "photoURL",
+        "role",
+        "notificationsEnabled",
+        "platformInfo",
+        "totalLaunches",
+        "lastActiveAt",
+        "createdAt"
+      ]
+    },
+    "ReadNotificationReceipt": {
+      "title": "ReadNotificationReceipt",
+      "description": "Tracks that a specific user has read a specific broadcast notification.",
+      "type": "object",
+      "properties": {
+        "notificationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "readAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["notificationId", "readAt"]
+    },
+    "BroadcastNotification": {
+      "title": "BroadcastNotification",
+      "description": "Platform-wide notification published by Eng. Mina Khairat to all users.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120
+        },
+        "body": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 1000
+        },
+        "type": {
+          "type": "string",
+          "enum": ["announcement", "new_app", "update", "urgent"]
+        },
+        "targetAppUrl": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "targetAppTitle": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "senderName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100
+        },
+        "isActive": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "body",
+        "type",
+        "targetAppUrl",
+        "targetAppTitle",
+        "senderName",
+        "isActive",
+        "createdAt"
+      ]
+    },
+    "ActivityLog": {
+      "title": "ActivityLog",
+      "description": "Private audit trail recording when a signed-in user launches an application.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "userEmail": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 150
+        },
+        "userName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "appId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "appTitle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "deviceType": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "userId",
+        "userEmail",
+        "userName",
+        "appId",
+        "appTitle",
+        "deviceType",
+        "createdAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/apps/{appId}": {
+      "schema": { "$ref": "#/entities/AppItem" },
+      "description": "Catalog of engineering web applications managed by the administrator."
+    },
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Private user profile documents; each user accesses only their own record while the administrator has oversight."
+    },
+    "/users/{userId}/readNotifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/ReadNotificationReceipt" },
+      "description": "Subcollection tracking which broadcast notifications a user has acknowledged."
+    },
+    "/notifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/BroadcastNotification" },
+      "description": "Broadcast notifications sent by the administrator to all platform users."
+    },
+    "/activityLogs/{logId}": {
+      "schema": { "$ref": "#/entities/ActivityLog" },
+      "description": "App launch logs visible only to the record owner and the administrator."
+    }
+  }
+}
