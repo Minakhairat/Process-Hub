@@ -13,7 +13,6 @@ import {
 } from 'lucide-react';
 import { OWNER_INFO } from '../data/defaultApps';
 import heroFactoryImg from '../assets/images/hero_fresh_factory_1794650867727.jpg';
-import operationsEmblemImg from '../assets/images/factory_operations_emblem_1794650867881.jpg';
 import { usePlatform } from '../context/PlatformContext';
 import { CATEGORY_LABELS, type AppCategory, type AppItem } from '../types/platform';
 import { AppIcon } from './AppIcon';
@@ -39,7 +38,6 @@ export const AppsCatalogView: React.FC<AppsCatalogViewProps> = ({ onOpenAuth }) 
   const [categoryFilter, setCategoryFilter] = useState<'all' | AppCategory>('all');
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [heroImgError, setHeroImgError] = useState(false);
-  const [emblemImgError, setEmblemImgError] = useState(false);
 
   const visibleApps = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -363,17 +361,7 @@ export const AppsCatalogView: React.FC<AppsCatalogViewProps> = ({ onOpenAuth }) 
       <section className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 sm:p-8">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
           <div className="flex items-start gap-4">
-            {!emblemImgError ? (
-              <img
-                src={operationsEmblemImg}
-                alt={OWNER_INFO.nameAr}
-                referrerPolicy="no-referrer"
-                onError={() => setEmblemImgError(true)}
-                className="h-16 w-16 rounded-2xl object-cover border border-zinc-200 dark:border-zinc-700 shrink-0"
-              />
-            ) : (
-              <FreshLogo size="lg" />
-            )}
+            <FreshLogo size="lg" className="h-16 min-w-[96px] p-2 rounded-2xl" />
             <div className="space-y-1">
               <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-red-700 dark:text-red-400">
                 <span>{OWNER_INFO.companyAr}</span>

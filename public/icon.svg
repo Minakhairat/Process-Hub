@@ -1,7 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
-  <rect width="512" height="512" rx="112" fill="#0F172A"/>
-  <rect x="44" y="44" width="424" height="424" rx="88" stroke="#1E293B" stroke-width="8"/>
-  <path d="M256 124L368 320H144L256 124Z" stroke="#3B82F6" stroke-width="26" stroke-linejoin="round"/>
-  <path d="M188 356H324" stroke="#F8FAFC" stroke-width="24" stroke-linecap="round"/>
-  <circle cx="256" cy="252" r="24" fill="#F8FAFC"/>
+  <rect width="512" height="512" rx="112" fill="#B91C1C"/>
+  <rect x="44" y="44" width="424" height="424" rx="88" stroke="#FCA5A5" stroke-opacity="0.35" stroke-width="8"/>
+  <text x="256" y="292" text-anchor="middle" fill="#FFFFFF" font-family="Arial, sans-serif" font-weight="900" font-size="112" letter-spacing="6">FRESH</text>
 </svg>
