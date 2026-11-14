@@ -90,9 +90,7 @@ export const AppsCatalogView: React.FC<AppsCatalogViewProps> = ({ onOpenAuth }) 
               </h1>
 
               <p className="text-sm sm:text-base text-red-50/90 leading-relaxed max-w-2xl">
-                {OWNER_INFO.specialtyAr} — بقيادة{' '}
-                <strong className="font-bold text-white">{OWNER_INFO.nameAr}</strong>،{' '}
-                {OWNER_INFO.roleAr}. بوابة موحدة لتشغيل أدوات التوازن والتدقيق ومراقبة الأداء عبر الكمبيوتر والتابلت والموبايل.
+                {OWNER_INFO.specialtyAr}. بوابة موحدة لتشغيل أدوات التوازن والتدقيق ومراقبة الأداء عبر الكمبيوتر والتابلت والموبايل.
               </p>
             </div>
 
