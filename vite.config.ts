@@ -16,6 +16,7 @@ export default defineConfig(() => {
         manifestFilename: 'fresh-ops.webmanifest',
         includeAssets: [
           'icon.svg',
+          'apple-touch-icon.png',
           'fresh-ops-apple-180.png',
           'fresh-ops-192.png',
           'fresh-ops-512.png',
