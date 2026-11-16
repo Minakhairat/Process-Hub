@@ -30,6 +30,7 @@ import {
   type NotificationType,
 } from '../types/platform';
 import { AppIcon, AVAILABLE_ICONS, ICON_REGISTRY, type IconKey } from './AppIcon';
+import { ProductivityAnalyticsChart } from './ProductivityAnalyticsChart';
 
 type AdminTab = 'apps' | 'broadcast' | 'users';
 
@@ -286,6 +287,9 @@ export const AdminConsole: React.FC = () => {
           </p>
         </div>
       </div>
+
+      {/* Daily Activity & Productivity Recharts Analytics */}
+      <ProductivityAnalyticsChart activityLogs={activityLogs} allUsers={allUsers} />
 
       {/* TAB 1: MANAGE APPS */}
       {activeTab === 'apps' && (
