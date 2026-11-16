@@ -200,11 +200,13 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
           <div>
             <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
-              رقم الهاتف (اختياري)
+              رقم الهاتف <span className="text-red-600">*</span>
             </label>
             <input
               type="tel"
               dir="ltr"
+              required
+              minLength={SCHEMA_LIMITS.USER_PHONE_MIN}
               maxLength={SCHEMA_LIMITS.USER_PHONE_MAX}
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
@@ -215,10 +217,12 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
           <div>
             <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
-              المسمى الوظيفي (اختياري)
+              المسمى الوظيفي <span className="text-red-600">*</span>
             </label>
             <input
               type="text"
+              required
+              minLength={SCHEMA_LIMITS.USER_JOB_MIN}
               maxLength={SCHEMA_LIMITS.USER_JOB_MAX}
               value={jobTitle}
               onChange={(e) => setJobTitle(e.target.value)}
@@ -229,10 +233,12 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
           <div>
             <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
-              القسم أو خط الإنتاج (اختياري)
+              القسم أو خط الإنتاج <span className="text-red-600">*</span>
             </label>
             <input
               type="text"
+              required
+              minLength={SCHEMA_LIMITS.USER_COMPANY_MIN}
               maxLength={SCHEMA_LIMITS.USER_COMPANY_MAX}
               value={company}
               onChange={(e) => setCompany(e.target.value)}

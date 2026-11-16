@@ -47,6 +47,18 @@ service cloud.firestore {
       return isVerifiedUser() && request.auth.uid == userId;
     }
 
+    // Approved user check for single-doc get and write operations (never used inside allow list)
+    function isApprovedUser() {
+      return isAdmin() || (
+        isVerifiedUser()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && ('approvalStatus' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data)
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.approvalStatus == 'approved'
+        && ('profileCompleted' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data)
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.profileCompleted == true
+      );
+    }
+
     // -------------------------------------------------------------------------
     // Entity Validation Helpers (Blueprint-Synchronized)
     // -------------------------------------------------------------------------
@@ -84,13 +96,15 @@ service cloud.firestore {
     function isValidUserProfile(data) {
       return data.keys().hasAll([
         'uid', 'email', 'displayName', 'phone', 'jobTitle', 'company',
-        'photoURL', 'role', 'notificationsEnabled', 'platformInfo',
-        'totalLaunches', 'lastActiveAt', 'createdAt'
+        'photoURL', 'role', 'approvalStatus', 'profileCompleted',
+        'notificationsEnabled', 'platformInfo', 'totalLaunches',
+        'lastActiveAt', 'createdAt'
       ])
       && data.keys().hasOnly([
         'uid', 'email', 'displayName', 'phone', 'jobTitle', 'company',
-        'photoURL', 'role', 'notificationsEnabled', 'platformInfo',
-        'totalLaunches', 'lastActiveAt', 'createdAt'
+        'photoURL', 'role', 'approvalStatus', 'profileCompleted',
+        'notificationsEnabled', 'platformInfo', 'totalLaunches',
+        'lastActiveAt', 'createdAt'
       ])
       && isValidId(data.uid)
       && data.email is string && data.email.size() >= 3 && data.email.size() <= 150
@@ -100,6 +114,16 @@ service cloud.firestore {
       && data.company is string && data.company.size() <= 100
       && data.photoURL is string && data.photoURL.size() <= 500
       && data.role in ['user', 'admin']
+      && data.approvalStatus in ['pending', 'approved', 'rejected']
+      && data.profileCompleted is bool
+      && (
+        data.profileCompleted == false || (
+          data.displayName.size() >= 2
+          && data.phone.size() >= 8
+          && data.jobTitle.size() >= 2
+          && data.company.size() >= 2
+        )
+      )
       && data.notificationsEnabled is bool
       && data.platformInfo is string && data.platformInfo.size() <= 100
       && data.totalLaunches is int && data.totalLaunches >= 0 && data.totalLaunches <= 10000000
@@ -159,10 +183,10 @@ service cloud.firestore {
     // Collection Rules
     // -------------------------------------------------------------------------
 
-    // 1. Applications Catalog (/apps/{appId})
+    // 1. Applications Catalog (/apps/{appId}) - Locked Behind Auth & Admin Approval
     match /apps/{appId} {
-      allow get: if isValidId(appId) && (resource.data.isActive == true || isAdmin());
-      allow list: if resource.data.isActive == true || isBootstrappedAdmin();
+      allow get: if isValidId(appId) && isApprovedUser() && (resource.data.isActive == true || isAdmin());
+      allow list: if isVerifiedUser() && (resource.data.isActive == true || isBootstrappedAdmin());
 
       allow create: if isAdmin()
         && isValidId(appId)
@@ -188,7 +212,7 @@ service cloud.firestore {
       allow delete: if isAdmin() && isValidId(appId);
     }
 
-    // 2. Users Collection (/users/{userId}) - Strict PII Isolation
+    // 2. Users Collection (/users/{userId}) - Strict PII Isolation & Admin Approval Gate
     match /users/{userId} {
       allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
       allow list: if isBootstrappedAdmin();
@@ -198,6 +222,7 @@ service cloud.firestore {
         && isValidUserProfile(incoming())
         && incoming().uid == request.auth.uid
         && (incoming().role == 'user' || (isBootstrappedAdmin() && incoming().role == 'admin'))
+        && (incoming().approvalStatus == 'pending' || (isBootstrappedAdmin() && incoming().approvalStatus == 'approved'))
         && incoming().totalLaunches == 0
         && incoming().createdAt == request.time
         && incoming().lastActiveAt == request.time;
@@ -209,21 +234,29 @@ service cloud.firestore {
         && incoming().createdAt == existing().createdAt
         && incoming().lastActiveAt == request.time
         && (
+          // Tier 1: Admin can update profile fields, role, and approvalStatus
           (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly([
             'displayName', 'phone', 'jobTitle', 'company', 'photoURL',
-            'role', 'notificationsEnabled', 'platformInfo', 'totalLaunches', 'lastActiveAt'
+            'role', 'approvalStatus', 'profileCompleted', 'notificationsEnabled',
+            'platformInfo', 'totalLaunches', 'lastActiveAt'
           ]))
           ||
+          // Tier 2: Owner can complete/update their profile (cannot change role, email, or approvalStatus)
           (isOwner(userId)
             && incoming().role == existing().role
             && incoming().email == existing().email
             && (
+              (!('approvalStatus' in existing()) && incoming().approvalStatus == 'pending')
+              || (('approvalStatus' in existing()) && incoming().approvalStatus == existing().approvalStatus)
+            )
+            && (
               (incoming().diff(existing()).affectedKeys().hasOnly([
                 'displayName', 'phone', 'jobTitle', 'company', 'photoURL',
-                'notificationsEnabled', 'platformInfo', 'lastActiveAt'
+                'approvalStatus', 'profileCompleted', 'notificationsEnabled',
+                'platformInfo', 'lastActiveAt'
               ]))
               ||
-              (incoming().diff(existing()).affectedKeys().hasOnly([
+              (isApprovedUser() && incoming().diff(existing()).affectedKeys().hasOnly([
                 'totalLaunches', 'platformInfo', 'lastActiveAt'
               ]) && incoming().totalLaunches == existing().totalLaunches + 1)
             )
@@ -243,6 +276,7 @@ service cloud.firestore {
 
         allow create: if isValidId(userId) && isValidId(notificationId)
           && isOwner(userId)
+          && isApprovedUser()
           && exists(/databases/$(database)/documents/users/$(userId))
           && isValidReadReceipt(incoming())
           && incoming().notificationId == notificationId
@@ -255,7 +289,7 @@ service cloud.firestore {
 
     // 3. Broadcast Notifications (/notifications/{notificationId})
     match /notifications/{notificationId} {
-      allow get: if isValidId(notificationId) && isVerifiedUser() && (resource.data.isActive == true || isAdmin());
+      allow get: if isValidId(notificationId) && isApprovedUser() && (resource.data.isActive == true || isAdmin());
       allow list: if isVerifiedUser() && (resource.data.isActive == true || isBootstrappedAdmin());
 
       allow create: if isAdmin()
@@ -281,7 +315,7 @@ service cloud.firestore {
       allow get: if isValidId(logId) && isVerifiedUser() && (resource.data.userId == request.auth.uid || isAdmin());
       allow list: if isVerifiedUser() && (resource.data.userId == request.auth.uid || isBootstrappedAdmin());
 
-      allow create: if isVerifiedUser()
+      allow create: if isApprovedUser()
         && isValidId(logId)
         && isValidActivityLog(incoming())
         && incoming().userId == request.auth.uid

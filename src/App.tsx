@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Bell, Grid, Moon, Shield, Sun, User, X } from 'lucide-react';
+import { AccessGateView } from './components/AccessGateView';
 import { AdminConsole } from './components/AdminConsole';
 import { AppsCatalogView } from './components/AppsCatalogView';
 import { AuthModal } from './components/AuthModal';
@@ -14,8 +15,12 @@ type ActiveSection = 'apps' | 'notifications' | 'profile' | 'admin';
 
 const PlatformShell: React.FC = () => {
   const {
+    authReady,
+    profileLoading,
     isAdmin,
     isVerified,
+    isApproved,
+    pendingUsersCount,
     userProfile,
     user,
     unreadCount,
@@ -53,11 +58,34 @@ const PlatformShell: React.FC = () => {
     }
   }, [isAdmin, section]);
 
+  if (!authReady || (user && isVerified && profileLoading && !isAdmin)) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-stone-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100 p-6 gap-4">
+        <FreshLogo size="lg" />
+        <div className="h-7 w-7 rounded-full border-2 border-red-600 border-t-transparent animate-spin" />
+        <p className="text-sm font-semibold text-zinc-600 dark:text-zinc-300">
+          جاري التحقق من حالة الحساب...
+        </p>
+      </div>
+    );
+  }
+
+  if (!isApproved) {
+    return (
+      <>
+        <AccessGateView theme={theme} onToggleTheme={toggleTheme} />
+        <OfflineIndicator />
+      </>
+    );
+  }
+
   const navItems: { id: ActiveSection; label: string; badge?: number; icon: React.ReactNode }[] = [
     { id: 'apps', label: 'التطبيقات', icon: <Grid className="h-5 w-5" /> },
     { id: 'notifications', label: 'الإشعارات', badge: unreadCount, icon: <Bell className="h-5 w-5" /> },
     { id: 'profile', label: 'حسابي', icon: <User className="h-5 w-5" /> },
-    ...(isAdmin ? [{ id: 'admin' as const, label: 'الإدارة', icon: <Shield className="h-5 w-5" /> }] : []),
+    ...(isAdmin
+      ? [{ id: 'admin' as const, label: 'الإدارة', badge: pendingUsersCount, icon: <Shield className="h-5 w-5" /> }]
+      : []),
   ];
 
   return (

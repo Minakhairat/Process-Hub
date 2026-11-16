@@ -160,6 +160,15 @@
           "enum": ["user", "admin"],
           "description": "Access role; self-registration is strictly restricted to user."
         },
+        "approvalStatus": {
+          "type": "string",
+          "enum": ["pending", "approved", "rejected"],
+          "description": "Account activation status controlled exclusively by the administrator."
+        },
+        "profileCompleted": {
+          "type": "boolean",
+          "description": "Whether the user has submitted complete personal and operational details."
+        },
         "notificationsEnabled": {
           "type": "boolean",
           "description": "User preference for OS/browser push notifications."
@@ -193,6 +202,8 @@
         "company",
         "photoURL",
         "role",
+        "approvalStatus",
+        "profileCompleted",
         "notificationsEnabled",
         "platformInfo",
         "totalLaunches",

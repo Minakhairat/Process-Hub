@@ -4,6 +4,7 @@ export type AppCategory = 'lean' | 'quality' | 'production' | 'training' | 'ai' 
 export type IconType = 'lucide' | 'image';
 export type AccentColor = 'red' | 'blue' | 'emerald' | 'amber' | 'indigo' | 'rose' | 'slate';
 export type UserRole = 'user' | 'admin';
+export type ApprovalStatus = 'pending' | 'approved' | 'rejected';
 export type NotificationType = 'announcement' | 'new_app' | 'update' | 'urgent';
 
 export const SCHEMA_LIMITS = {
@@ -16,9 +17,13 @@ export const SCHEMA_LIMITS = {
   APP_URL_MAX: 500,
   ICON_NAME_MAX: 60,
   ICON_URL_MAX: 1000,
+  USER_NAME_MIN: 2,
   USER_NAME_MAX: 100,
+  USER_PHONE_MIN: 8,
   USER_PHONE_MAX: 30,
+  USER_JOB_MIN: 2,
   USER_JOB_MAX: 100,
+  USER_COMPANY_MIN: 2,
   USER_COMPANY_MAX: 100,
   NOTIF_TITLE_MAX: 120,
   NOTIF_BODY_MAX: 1000,
@@ -52,6 +57,8 @@ export interface UserProfile {
   company: string;
   photoURL: string;
   role: UserRole;
+  approvalStatus: ApprovalStatus;
+  profileCompleted: boolean;
   notificationsEnabled: boolean;
   platformInfo: string;
   totalLaunches: number;
@@ -96,4 +103,10 @@ export const NOTIFICATION_TYPE_LABELS: Record<NotificationType, string> = {
   new_app: 'إضافة تطبيق جديد',
   update: 'تحديث أداة',
   urgent: 'تنبيه هام',
+};
+
+export const APPROVAL_STATUS_LABELS: Record<ApprovalStatus, string> = {
+  pending: 'بانتظار الموافقة',
+  approved: 'مقبول ومفعل',
+  rejected: 'مرفوض',
 };

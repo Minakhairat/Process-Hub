@@ -2,7 +2,9 @@ import React, { useState } from 'react';
 import {
   Activity,
   Bell,
+  Check,
   CheckCircle2,
+  Clock,
   Edit3,
   Eye,
   EyeOff,
@@ -12,16 +14,19 @@ import {
   Send,
   Trash2,
   Users,
+  X,
 } from 'lucide-react';
 import { usePlatform, type AppFormInput } from '../context/PlatformContext';
 import { OWNER_INFO } from '../data/defaultApps';
 import {
+  APPROVAL_STATUS_LABELS,
   CATEGORY_LABELS,
   NOTIFICATION_TYPE_LABELS,
   SCHEMA_LIMITS,
   type AccentColor,
   type AppCategory,
   type AppItem,
+  type ApprovalStatus,
   type NotificationType,
 } from '../types/platform';
 import { AppIcon, AVAILABLE_ICONS, ICON_REGISTRY, type IconKey } from './AppIcon';
@@ -59,6 +64,7 @@ export const AdminConsole: React.FC = () => {
     apps,
     appsFromFirestore,
     allUsers,
+    pendingUsersCount,
     activityLogs,
     notifications,
     saveApp,
@@ -67,6 +73,7 @@ export const AdminConsole: React.FC = () => {
     sendBroadcastNotification,
     toggleNotificationActive,
     removeNotification,
+    updateUserApproval,
   } = usePlatform();
 
   const [activeTab, setActiveTab] = useState<AdminTab>('apps');
@@ -75,6 +82,7 @@ export const AdminConsole: React.FC = () => {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [savingApp, setSavingApp] = useState(false);
   const [appStatusMsg, setAppStatusMsg] = useState('');
+  const [updatingUid, setUpdatingUid] = useState<string | null>(null);
 
   // Broadcast notification state
   const [notifTitle, setNotifTitle] = useState('');
@@ -156,6 +164,19 @@ export const AdminConsole: React.FC = () => {
     setNotifSentMsg('تم بث التوجيه لجميع فريق المصنع بنجاح.');
   };
 
+  const pendingUsers = allUsers.filter(
+    (u) => u.role !== 'admin' && u.approvalStatus === 'pending'
+  );
+
+  const handleApprovalChange = async (uid: string, status: ApprovalStatus) => {
+    setUpdatingUid(uid);
+    try {
+      await updateUserApproval(uid, status);
+    } finally {
+      setUpdatingUid(null);
+    }
+  };
+
   return (
     <div className="space-y-6 pb-8">
       {/* Header & Summary Strip */}
@@ -206,13 +227,46 @@ export const AdminConsole: React.FC = () => {
             }`}
           >
             <Users className="h-4 w-4" />
-            <span>الفريق ({allUsers.length})</span>
+            <span>
+              الفريق ({allUsers.length})
+              {pendingUsersCount > 0 ? ` · ${pendingUsersCount} طلب` : ''}
+            </span>
           </button>
         </div>
       </div>
 
+      {/* Pending Approvals Callout when on another tab */}
+      {pendingUsersCount > 0 && activeTab !== 'users' && (
+        <div className="rounded-2xl border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <Clock className="h-5 w-5 text-amber-700 dark:text-amber-400 shrink-0" />
+            <div>
+              <p className="text-sm font-bold text-zinc-900 dark:text-white">
+                يوجد <span className="font-mono-nums">{pendingUsersCount}</span> حساب بانتظار موافقتك للدخول
+              </p>
+              <p className="text-xs text-zinc-600 dark:text-zinc-300">
+                راجع بيانات الأعضاء الجدد وقم بتفعيل أو رفض الحسابات من تبويب الفريق.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setActiveTab('users')}
+            className="min-h-[40px] px-4 py-2 rounded-xl bg-red-600 text-white text-xs font-semibold hover:bg-red-700 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+          >
+            مراجعة طلبات القبول
+          </button>
+        </div>
+      )}
+
       {/* KPI Strip */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">طلبات بانتظار الموافقة</p>
+          <p className="mt-1 text-2xl font-extrabold font-mono-nums text-amber-600 dark:text-amber-400">
+            {pendingUsersCount}
+          </p>
+        </div>
         <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
           <p className="text-xs text-zinc-500 dark:text-zinc-400">الأدوات المسجلة</p>
           <p className="mt-1 text-2xl font-extrabold font-mono-nums text-red-600 dark:text-red-400">
@@ -223,12 +277,6 @@ export const AdminConsole: React.FC = () => {
           <p className="text-xs text-zinc-500 dark:text-zinc-400">فريق العمل المسجل</p>
           <p className="mt-1 text-2xl font-extrabold font-mono-nums text-zinc-900 dark:text-white">
             {allUsers.length}
-          </p>
-        </div>
-        <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">الإشعارات المرسلة</p>
-          <p className="mt-1 text-2xl font-extrabold font-mono-nums text-zinc-900 dark:text-white">
-            {notifications.length}
           </p>
         </div>
         <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
@@ -732,9 +780,91 @@ export const AdminConsole: React.FC = () => {
         </div>
       )}
 
-      {/* TAB 3: PRIVACY-PROTECTED USERS & ACTIVITY */}
+      {/* TAB 3: PRIVACY-PROTECTED USERS, APPROVALS & ACTIVITY */}
       {activeTab === 'users' && (
         <div className="space-y-6">
+          {/* Pending Approvals Queue */}
+          <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-hidden">
+            <div className="p-5 border-b border-zinc-100 dark:border-zinc-800 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-base font-bold text-zinc-900 dark:text-white">
+                  طلبات الانضمام بانتظار موافقتك ({pendingUsers.length})
+                </h2>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                  لن يتمكن أي مستخدم جديد من فتح أو رؤية التطبيقات حتى تقوم بقبول حسابه من هنا.
+                </p>
+              </div>
+            </div>
+
+            {pendingUsers.length === 0 ? (
+              <div className="p-6 text-center text-sm text-zinc-500 dark:text-zinc-400">
+                لا توجد طلبات معلقة حالياً.
+              </div>
+            ) : (
+              <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                {pendingUsers.map((u) => {
+                  const busyUser = updatingUid === u.uid;
+                  return (
+                    <div
+                      key={u.uid}
+                      className="p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4"
+                    >
+                      <div className="space-y-1 min-w-0">
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+                          <span className="font-semibold text-amber-700 dark:text-amber-400">
+                            بانتظار الموافقة
+                          </span>
+                          <span aria-hidden="true">·</span>
+                          <span>
+                            {u.profileCompleted ? 'مكتمل البيانات' : 'لم يستكمل بياناته بعد'}
+                          </span>
+                          <span aria-hidden="true">·</span>
+                          <span className="font-mono-nums">{u.platformInfo || 'Web'}</span>
+                        </div>
+
+                        <p className="text-base font-bold text-zinc-900 dark:text-white">
+                          {u.displayName}
+                        </p>
+
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-600 dark:text-zinc-300">
+                          <span className="font-latin" dir="ltr">{u.email}</span>
+                          <span aria-hidden="true">·</span>
+                          <span className="font-mono-nums" dir="ltr">{u.phone || 'بدون هاتف'}</span>
+                          <span aria-hidden="true">·</span>
+                          <span>{u.jobTitle || 'بدون مسمى'}</span>
+                          <span aria-hidden="true">·</span>
+                          <span>{u.company || 'بدون قسم'}</span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          disabled={busyUser}
+                          onClick={() => void handleApprovalChange(u.uid, 'approved')}
+                          className="min-h-[40px] inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-700 transition-colors cursor-pointer disabled:opacity-60"
+                        >
+                          <Check className="h-4 w-4" />
+                          <span>قبول وتفعيل</span>
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busyUser}
+                          onClick={() => void handleApprovalChange(u.uid, 'rejected')}
+                          className="min-h-[40px] inline-flex items-center gap-1.5 rounded-xl border border-red-200 dark:border-red-800/70 px-3.5 py-2 text-xs font-semibold text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors cursor-pointer disabled:opacity-60"
+                        >
+                          <X className="h-4 w-4" />
+                          <span>رفض</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* All Users Directory */}
           <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-hidden">
             <div className="p-5 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
               <div>
@@ -742,7 +872,7 @@ export const AdminConsole: React.FC = () => {
                   قائمة فريق المصنع المسجلين (مرئية لمدير العمليات فقط)
                 </h2>
                 <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                  تخضع لسياسة حماية الخصوصية — لا يمكن لأي مستخدم الاطلاع على بيانات مستخدم آخر
+                  تخضع لسياسة حماية الخصوصية — يمكنك تفعيل أو إيقاف أي حساب في أي وقت
                 </p>
               </div>
             </div>
@@ -755,36 +885,85 @@ export const AdminConsole: React.FC = () => {
                     <th className="py-3 px-4 font-semibold">البريد الإلكتروني</th>
                     <th className="py-3 px-4 font-semibold">الهاتف</th>
                     <th className="py-3 px-4 font-semibold">الوظيفة / القسم</th>
-                    <th className="py-3 px-4 font-semibold">الجهاز</th>
-                    <th className="py-3 px-4 font-semibold text-left">مرات الفتح</th>
+                    <th className="py-3 px-4 font-semibold">حالة الحساب</th>
+                    <th className="py-3 px-4 font-semibold">مرات الفتح</th>
+                    <th className="py-3 px-4 font-semibold text-left">إجراء</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-                  {allUsers.map((u) => (
-                    <tr key={u.uid} className="hover:bg-stone-50/70 dark:hover:bg-zinc-800/40">
-                      <td className="py-3 px-4 font-semibold text-zinc-900 dark:text-white whitespace-nowrap">
-                        {u.displayName}
-                      </td>
-                      <td className="py-3 px-4 font-latin text-xs text-zinc-600 dark:text-zinc-300 whitespace-nowrap" dir="ltr">
-                        {u.email}
-                      </td>
-                      <td className="py-3 px-4 font-mono-nums text-xs text-zinc-600 dark:text-zinc-300 whitespace-nowrap" dir="ltr">
-                        {u.phone || '—'}
-                      </td>
-                      <td className="py-3 px-4 text-xs text-zinc-600 dark:text-zinc-300 whitespace-nowrap">
-                        {[u.jobTitle, u.company].filter(Boolean).join(' · ') || '—'}
-                      </td>
-                      <td className="py-3 px-4 font-mono-nums text-xs text-zinc-500 dark:text-zinc-400 whitespace-nowrap">
-                        {u.platformInfo || 'Web'}
-                      </td>
-                      <td className="py-3 px-4 font-mono-nums font-bold text-zinc-900 dark:text-white text-left">
-                        {u.totalLaunches}
-                      </td>
-                    </tr>
-                  ))}
+                  {allUsers.map((u) => {
+                    const isMainAdmin = u.role === 'admin';
+                    const busyUser = updatingUid === u.uid;
+                    return (
+                      <tr key={u.uid} className="hover:bg-stone-50/70 dark:hover:bg-zinc-800/40">
+                        <td className="py-3 px-4 font-semibold text-zinc-900 dark:text-white whitespace-nowrap">
+                          {u.displayName}
+                        </td>
+                        <td className="py-3 px-4 font-latin text-xs text-zinc-600 dark:text-zinc-300 whitespace-nowrap" dir="ltr">
+                          {u.email}
+                        </td>
+                        <td className="py-3 px-4 font-mono-nums text-xs text-zinc-600 dark:text-zinc-300 whitespace-nowrap" dir="ltr">
+                          {u.phone || '—'}
+                        </td>
+                        <td className="py-3 px-4 text-xs text-zinc-600 dark:text-zinc-300 whitespace-nowrap">
+                          {[u.jobTitle, u.company].filter(Boolean).join(' · ') || '—'}
+                        </td>
+                        <td className="py-3 px-4 text-xs whitespace-nowrap">
+                          {isMainAdmin ? (
+                            <span className="font-semibold text-red-700 dark:text-red-400">
+                              الحساب الرئيسي
+                            </span>
+                          ) : (
+                            <span
+                              className={`font-semibold ${
+                                u.approvalStatus === 'approved'
+                                  ? 'text-emerald-700 dark:text-emerald-400'
+                                  : u.approvalStatus === 'rejected'
+                                    ? 'text-red-600 dark:text-red-400'
+                                    : 'text-amber-700 dark:text-amber-400'
+                              }`}
+                            >
+                              {APPROVAL_STATUS_LABELS[u.approvalStatus || 'pending']}
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3 px-4 font-mono-nums font-bold text-zinc-900 dark:text-white">
+                          {u.totalLaunches}
+                        </td>
+                        <td className="py-3 px-4 text-left whitespace-nowrap">
+                          {isMainAdmin ? (
+                            <span className="text-xs text-zinc-400">—</span>
+                          ) : (
+                            <div className="inline-flex items-center gap-1.5">
+                              {u.approvalStatus !== 'approved' && (
+                                <button
+                                  type="button"
+                                  disabled={busyUser}
+                                  onClick={() => void handleApprovalChange(u.uid, 'approved')}
+                                  className="min-h-[34px] px-3 py-1 rounded-lg bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700 cursor-pointer disabled:opacity-60"
+                                >
+                                  قبول
+                                </button>
+                              )}
+                              {u.approvalStatus !== 'rejected' && (
+                                <button
+                                  type="button"
+                                  disabled={busyUser}
+                                  onClick={() => void handleApprovalChange(u.uid, 'rejected')}
+                                  className="min-h-[34px] px-3 py-1 rounded-lg border border-red-200 dark:border-red-800/70 text-red-600 dark:text-red-400 text-xs font-semibold hover:bg-red-50 dark:hover:bg-red-950/30 cursor-pointer disabled:opacity-60"
+                                >
+                                  {u.approvalStatus === 'approved' ? 'إيقاف' : 'رفض'}
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                   {allUsers.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="py-8 text-center text-sm text-zinc-500">
+                      <td colSpan={7} className="py-8 text-center text-sm text-zinc-500">
                         لا يوجد مستخدمون مسجلون بعد.
                       </td>
                     </tr>

@@ -32,6 +32,7 @@ import {
   type ActivityLog,
   type AppCategory,
   type AppItem,
+  type ApprovalStatus,
   type BroadcastNotification,
   type IconType,
   type NotificationType,
@@ -73,10 +74,14 @@ export interface ProfileUpdateInput {
 
 interface PlatformContextValue {
   authReady: boolean;
+  profileLoading: boolean;
   user: User | null;
   userProfile: UserProfile | null;
   isAdmin: boolean;
   isVerified: boolean;
+  isProfileComplete: boolean;
+  isApproved: boolean;
+  pendingUsersCount: number;
   apps: AppItem[];
   appsFromFirestore: boolean;
   appsLoading: boolean;
@@ -94,6 +99,7 @@ interface PlatformContextValue {
   refreshAuthUser: () => Promise<boolean>;
   signOutUser: () => Promise<void>;
   updateOwnProfile: (input: ProfileUpdateInput) => Promise<void>;
+  updateUserApproval: (targetUid: string, status: ApprovalStatus) => Promise<void>;
   trackAppLaunch: (app: AppItem) => void;
   markNotificationRead: (notificationId: string) => Promise<void>;
   markAllNotificationsRead: () => Promise<void>;
@@ -109,10 +115,11 @@ const PlatformContext = createContext<PlatformContextValue | null>(null);
 
 export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [authReady, setAuthReady] = useState(false);
+  const [profileLoading, setProfileLoading] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [firestoreApps, setFirestoreApps] = useState<AppItem[]>([]);
-  const [appsLoading, setAppsLoading] = useState(true);
+  const [appsLoading, setAppsLoading] = useState(false);
   const [adminAppsReady, setAdminAppsReady] = useState(false);
   const [notifications, setNotifications] = useState<BroadcastNotification[]>([]);
   const [readNotificationIds, setReadNotificationIds] = useState<Set<string>>(new Set());
@@ -129,6 +136,27 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     isVerified && user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()
   );
 
+  const isProfileComplete = useMemo(() => {
+    if (isAdmin) return true;
+    if (!userProfile) return false;
+    return (
+      Boolean(userProfile.profileCompleted) &&
+      userProfile.displayName.trim().length >= SCHEMA_LIMITS.USER_NAME_MIN &&
+      userProfile.phone.trim().length >= SCHEMA_LIMITS.USER_PHONE_MIN &&
+      userProfile.jobTitle.trim().length >= SCHEMA_LIMITS.USER_JOB_MIN &&
+      userProfile.company.trim().length >= SCHEMA_LIMITS.USER_COMPANY_MIN
+    );
+  }, [isAdmin, userProfile]);
+
+  const isApproved = useMemo(() => {
+    if (isAdmin) return true;
+    return Boolean(
+      isVerified &&
+        isProfileComplete &&
+        userProfile?.approvalStatus === 'approved'
+    );
+  }, [isAdmin, isVerified, isProfileComplete, userProfile]);
+
   // 1. Auth State Listener
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (firebaseUser) => {
@@ -136,6 +164,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       setAuthReady(true);
       if (!firebaseUser) {
         setUserProfile(null);
+        setProfileLoading(false);
+        setFirestoreApps([]);
         setNotifications([]);
         setReadNotificationIds(new Set());
         setAllUsers([]);
@@ -151,11 +181,14 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   useEffect(() => {
     if (!authReady || !user || !user.emailVerified) {
       setUserProfile(null);
+      setProfileLoading(false);
       return;
     }
 
+    setProfileLoading(true);
     const userDocRef = doc(db, 'users', user.uid);
-    const platformInfo = detectPlatformInfo();
+    const platformInfo = detectPlatformInfo().slice(0, 100);
+    const isAdminEmail = user.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
 
     const ensureUserProfile = async () => {
       try {
@@ -164,24 +197,72 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           const newProfile = {
             uid: user.uid,
             email: (user.email || '').slice(0, 150),
-            displayName: (user.displayName || user.email?.split('@')[0] || 'مستخدم').slice(0, SCHEMA_LIMITS.USER_NAME_MAX),
-            phone: '',
-            jobTitle: '',
-            company: '',
+            displayName: (
+              user.displayName ||
+              (isAdminEmail ? OWNER_INFO.nameAr : user.email?.split('@')[0]) ||
+              'مستخدم'
+            ).slice(0, SCHEMA_LIMITS.USER_NAME_MAX),
+            phone: isAdminEmail ? OWNER_INFO.phone : '',
+            jobTitle: isAdminEmail ? OWNER_INFO.roleAr : '',
+            company: isAdminEmail ? OWNER_INFO.companyAr : '',
             photoURL: (user.photoURL || '').slice(0, 500),
-            role: user.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase() ? 'admin' : 'user',
-            notificationsEnabled: typeof Notification !== 'undefined' && Notification.permission === 'granted',
-            platformInfo: platformInfo.slice(0, 100),
+            role: isAdminEmail ? 'admin' : 'user',
+            approvalStatus: isAdminEmail ? 'approved' : 'pending',
+            profileCompleted: isAdminEmail,
+            notificationsEnabled:
+              typeof Notification !== 'undefined' && Notification.permission === 'granted',
+            platformInfo,
             totalLaunches: 0,
             lastActiveAt: serverTimestamp(),
             createdAt: serverTimestamp(),
           };
           await setDoc(userDocRef, newProfile);
         } else {
-          await updateDoc(userDocRef, {
-            platformInfo: platformInfo.slice(0, 100),
-            lastActiveAt: serverTimestamp(),
-          });
+          const existingData = snap.data() as Partial<UserProfile>;
+          if (isAdminEmail) {
+            if (
+              existingData.role !== 'admin' ||
+              existingData.approvalStatus !== 'approved' ||
+              !existingData.profileCompleted
+            ) {
+              await updateDoc(userDocRef, {
+                role: 'admin',
+                approvalStatus: 'approved',
+                profileCompleted: true,
+                phone: existingData.phone?.trim() ? existingData.phone : OWNER_INFO.phone,
+                jobTitle: existingData.jobTitle?.trim() ? existingData.jobTitle : OWNER_INFO.roleAr,
+                company: existingData.company?.trim() ? existingData.company : OWNER_INFO.companyAr,
+                platformInfo,
+                lastActiveAt: serverTimestamp(),
+              });
+            } else {
+              await updateDoc(userDocRef, {
+                platformInfo,
+                lastActiveAt: serverTimestamp(),
+              });
+            }
+          } else if (
+            !existingData.approvalStatus ||
+            typeof existingData.profileCompleted !== 'boolean'
+          ) {
+            const hasCompleteFields =
+              (existingData.displayName || '').trim().length >= SCHEMA_LIMITS.USER_NAME_MIN &&
+              (existingData.phone || '').trim().length >= SCHEMA_LIMITS.USER_PHONE_MIN &&
+              (existingData.jobTitle || '').trim().length >= SCHEMA_LIMITS.USER_JOB_MIN &&
+              (existingData.company || '').trim().length >= SCHEMA_LIMITS.USER_COMPANY_MIN;
+
+            await updateDoc(userDocRef, {
+              approvalStatus: existingData.approvalStatus || 'pending',
+              profileCompleted: hasCompleteFields,
+              platformInfo,
+              lastActiveAt: serverTimestamp(),
+            });
+          } else {
+            await updateDoc(userDocRef, {
+              platformInfo,
+              lastActiveAt: serverTimestamp(),
+            });
+          }
         }
       } catch (error) {
         handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}`);
@@ -194,10 +275,29 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       userDocRef,
       (snap) => {
         if (snap.exists()) {
-          setUserProfile(snap.data() as UserProfile);
+          const raw = snap.data() as Partial<UserProfile>;
+          setUserProfile({
+            uid: raw.uid || user.uid,
+            email: raw.email || user.email || '',
+            displayName: raw.displayName || user.displayName || 'مستخدم',
+            phone: raw.phone || '',
+            jobTitle: raw.jobTitle || '',
+            company: raw.company || '',
+            photoURL: raw.photoURL || '',
+            role: raw.role === 'admin' ? 'admin' : 'user',
+            approvalStatus: raw.approvalStatus || (isAdminEmail ? 'approved' : 'pending'),
+            profileCompleted: Boolean(raw.profileCompleted),
+            notificationsEnabled: Boolean(raw.notificationsEnabled),
+            platformInfo: raw.platformInfo || platformInfo,
+            totalLaunches: raw.totalLaunches ?? 0,
+            lastActiveAt: raw.lastActiveAt ?? null,
+            createdAt: raw.createdAt ?? null,
+          });
+          setProfileLoading(false);
         }
       },
       (error) => {
+        setProfileLoading(false);
         handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
       }
     );
@@ -205,8 +305,15 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return () => unsubProfile();
   }, [authReady, user, isVerified]);
 
-  // 3. Apps Catalog Listener (Active apps for all; All apps for Admin)
+  // 3. Apps Catalog Listener (STRICTLY LOCKED: Only runs for Admin or Admin-Approved Users)
   useEffect(() => {
+    if (!authReady || !user || !isVerified || !isApproved) {
+      setFirestoreApps([]);
+      setAppsLoading(false);
+      setAdminAppsReady(false);
+      return;
+    }
+
     setAppsLoading(true);
     setAdminAppsReady(false);
     const appsCol = collection(db, 'apps');
@@ -230,7 +337,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     );
 
     return () => unsubApps();
-  }, [isAdmin]);
+  }, [authReady, user, isVerified, isApproved, isAdmin]);
 
   // 4. Auto-seed Default Apps into Firestore on First Admin Login if Empty
   useEffect(() => {
@@ -275,9 +382,12 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
-  // 5. Broadcast Notifications Listener (Verified Users)
+  // 5. Broadcast Notifications Listener (STRICTLY LOCKED: Approved Users or Admin Only)
   useEffect(() => {
-    if (!authReady || !user || !isVerified) return;
+    if (!authReady || !user || !isVerified || !isApproved) {
+      setNotifications([]);
+      return;
+    }
 
     const notifCol = collection(db, 'notifications');
     const notifQuery = isAdmin ? query(notifCol) : query(notifCol, where('isActive', '==', true));
@@ -314,11 +424,14 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     );
 
     return () => unsubNotifs();
-  }, [authReady, user, isVerified, isAdmin]);
+  }, [authReady, user, isVerified, isApproved, isAdmin]);
 
-  // 5b. Read Receipts Listener (Only after userProfile exists)
+  // 5b. Read Receipts Listener (Only after userProfile exists and is approved)
   useEffect(() => {
-    if (!authReady || !user || !isVerified || !userProfile) return;
+    if (!authReady || !user || !isVerified || !isApproved || !userProfile) {
+      setReadNotificationIds(new Set());
+      return;
+    }
 
     const readCol = collection(db, 'users', user.uid, 'readNotifications');
     const unsubRead = onSnapshot(
@@ -334,7 +447,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     );
 
     return () => unsubRead();
-  }, [authReady, user, isVerified, userProfile]);
+  }, [authReady, user, isVerified, isApproved, userProfile]);
 
   // 6. Admin-Only Listeners: All Users & Activity Logs
   useEffect(() => {
@@ -347,7 +460,26 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const unsubUsers = onSnapshot(
       collection(db, 'users'),
       (snapshot) => {
-        const usersList = snapshot.docs.map((d) => d.data() as UserProfile);
+        const usersList = snapshot.docs.map((d) => {
+          const raw = d.data() as Partial<UserProfile>;
+          return {
+            uid: raw.uid || d.id,
+            email: raw.email || '',
+            displayName: raw.displayName || 'مستخدم',
+            phone: raw.phone || '',
+            jobTitle: raw.jobTitle || '',
+            company: raw.company || '',
+            photoURL: raw.photoURL || '',
+            role: raw.role === 'admin' ? 'admin' : 'user',
+            approvalStatus: raw.approvalStatus || (raw.role === 'admin' ? 'approved' : 'pending'),
+            profileCompleted: Boolean(raw.profileCompleted),
+            notificationsEnabled: Boolean(raw.notificationsEnabled),
+            platformInfo: raw.platformInfo || 'Web',
+            totalLaunches: raw.totalLaunches ?? 0,
+            lastActiveAt: raw.lastActiveAt ?? null,
+            createdAt: raw.createdAt ?? null,
+          } satisfies UserProfile;
+        });
         usersList.sort((a, b) => {
           const ta = a.lastActiveAt?.toMillis?.() ?? 0;
           const tb = b.lastActiveAt?.toMillis?.() ?? 0;
@@ -393,13 +525,13 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         return {
           ok: false,
           error:
-            'تسجيل الدخول بكلمة المرور غير مفعّل بعد في Firebase Console (Authentication → Sign-in method → Email/Password). يمكنك تسجيل الدخول فوراً بحساب Google.',
+            'تسجيل الدخول بكلمة المرور غير مفعّل. يرجى تسجيل الدخول بحساب Google (Gmail).',
         };
       }
       if (code === 'auth/invalid-credential' || code === 'auth/wrong-password' || code === 'auth/user-not-found') {
         return { ok: false, error: 'البريد الإلكتروني أو كلمة المرور غير صحيحة.' };
       }
-      return { ok: false, error: 'تعذر تسجيل الدخول حالياً، يرجى المحاولة مجدداً أو استخدام حساب Google.' };
+      return { ok: false, error: 'تعذر تسجيل الدخول حالياً، يرجى استخدام حساب Google (Gmail).' };
     }
   };
 
@@ -417,7 +549,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         return {
           ok: false,
           error:
-            'التسجيل بكلمة المرور غير مفعّل بعد في Firebase Console (Authentication → Sign-in method → Email/Password). يمكنك الدخول فوراً بحساب Google.',
+            'التسجيل بكلمة المرور غير مفعّل. يرجى الدخول بحساب Google (Gmail).',
         };
       }
       if (code === 'auth/email-already-in-use') {
@@ -454,13 +586,28 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const updateOwnProfile = async (input: ProfileUpdateInput) => {
     if (!user || !isVerified) return;
     const ref = doc(db, 'users', user.uid);
+    const cleanName = (input.displayName.trim() || 'مستخدم').slice(0, SCHEMA_LIMITS.USER_NAME_MAX);
+    const cleanPhone = input.phone.trim().slice(0, SCHEMA_LIMITS.USER_PHONE_MAX);
+    const cleanJob = input.jobTitle.trim().slice(0, SCHEMA_LIMITS.USER_JOB_MAX);
+    const cleanCompany = input.company.trim().slice(0, SCHEMA_LIMITS.USER_COMPANY_MAX);
+
+    const complete =
+      cleanName.length >= SCHEMA_LIMITS.USER_NAME_MIN &&
+      cleanPhone.length >= SCHEMA_LIMITS.USER_PHONE_MIN &&
+      cleanJob.length >= SCHEMA_LIMITS.USER_JOB_MIN &&
+      cleanCompany.length >= SCHEMA_LIMITS.USER_COMPANY_MIN;
+
     try {
       await updateDoc(ref, {
-        displayName: (input.displayName.trim() || 'مستخدم').slice(0, SCHEMA_LIMITS.USER_NAME_MAX),
-        phone: input.phone.trim().slice(0, SCHEMA_LIMITS.USER_PHONE_MAX),
-        jobTitle: input.jobTitle.trim().slice(0, SCHEMA_LIMITS.USER_JOB_MAX),
-        company: input.company.trim().slice(0, SCHEMA_LIMITS.USER_COMPANY_MAX),
+        displayName: cleanName,
+        phone: cleanPhone,
+        jobTitle: cleanJob,
+        company: cleanCompany,
         notificationsEnabled: input.notificationsEnabled,
+        profileCompleted: isAdmin ? true : complete,
+        ...(userProfile?.approvalStatus
+          ? {}
+          : { approvalStatus: isAdmin ? 'approved' : 'pending' }),
         platformInfo: detectPlatformInfo().slice(0, 100),
         lastActiveAt: serverTimestamp(),
       });
@@ -469,8 +616,21 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
+  const updateUserApproval = async (targetUid: string, status: ApprovalStatus) => {
+    if (!isAdmin) return;
+    const ref = doc(db, 'users', targetUid);
+    try {
+      await updateDoc(ref, {
+        approvalStatus: status,
+        lastActiveAt: serverTimestamp(),
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `users/${targetUid}`);
+    }
+  };
+
   const trackAppLaunch = (appItem: AppItem) => {
-    if (!user || !isVerified) return;
+    if (!user || !isVerified || !isApproved) return;
     const logId = `log_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
     const logRef = doc(db, 'activityLogs', logId);
     const userRef = doc(db, 'users', user.uid);
@@ -498,7 +658,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const markNotificationRead = async (notificationId: string) => {
-    if (!user || !isVerified) return;
+    if (!user || !isVerified || !isApproved) return;
     if (readNotificationIds.has(notificationId)) return;
     const receiptRef = doc(db, 'users', user.uid, 'readNotifications', notificationId);
     try {
@@ -512,7 +672,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const markAllNotificationsRead = async () => {
-    if (!user || !isVerified) return;
+    if (!user || !isVerified || !isApproved) return;
     const unread = notifications.filter((n) => n.isActive && !readNotificationIds.has(n.id));
     for (const n of unread) {
       await markNotificationRead(n.id);
@@ -627,22 +787,31 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
-  const appsFromFirestore = firestoreApps.length > 0;
+  const appsFromFirestore = isApproved && firestoreApps.length > 0;
   const effectiveApps = useMemo(() => {
+    if (!isApproved) return [];
     if (firestoreApps.length > 0) return firestoreApps;
     return DEFAULT_APPS;
-  }, [firestoreApps]);
+  }, [isApproved, firestoreApps]);
 
   const unreadCount = useMemo(() => {
     return notifications.filter((n) => n.isActive && !readNotificationIds.has(n.id)).length;
   }, [notifications, readNotificationIds]);
 
+  const pendingUsersCount = useMemo(() => {
+    return allUsers.filter((u) => u.role !== 'admin' && u.approvalStatus === 'pending').length;
+  }, [allUsers]);
+
   const value: PlatformContextValue = {
     authReady,
+    profileLoading,
     user,
     userProfile,
     isAdmin,
     isVerified,
+    isProfileComplete,
+    isApproved,
+    pendingUsersCount,
     apps: effectiveApps,
     appsFromFirestore,
     appsLoading,
@@ -660,6 +829,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     refreshAuthUser,
     signOutUser,
     updateOwnProfile,
+    updateUserApproval,
     trackAppLaunch,
     markNotificationRead,
     markAllNotificationsRead,
