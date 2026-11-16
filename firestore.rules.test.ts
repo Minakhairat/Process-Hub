@@ -96,7 +96,7 @@ export const dirtyDozenPayloads = [
     auth: { uid: 'user-1', token: { email: 'user1@gmail.com', email_verified: true } },
     operation: 'update',
     path: '/users/user-1',
-    payload: { profileCompleted: true, phone: '', jobTitle: '', company: '' },
+    payload: { profileCompleted: true, employeeCode: '', phone: '', jobTitle: '', company: '' },
     expected: 'PERMISSION_DENIED',
   },
   {

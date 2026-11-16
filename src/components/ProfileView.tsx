@@ -29,6 +29,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const { user, userProfile, isVerified, isAdmin, updateOwnProfile, signOutUser } = usePlatform();
 
   const [displayName, setDisplayName] = useState('');
+  const [employeeCode, setEmployeeCode] = useState('');
   const [phone, setPhone] = useState('');
   const [jobTitle, setJobTitle] = useState('');
   const [company, setCompany] = useState('');
@@ -39,6 +40,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   useEffect(() => {
     if (userProfile) {
       setDisplayName(userProfile.displayName || '');
+      setEmployeeCode(userProfile.employeeCode || '');
       setPhone(userProfile.phone || '');
       setJobTitle(userProfile.jobTitle || '');
       setCompany(userProfile.company || '');
@@ -55,6 +57,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     }
     await updateOwnProfile({
       displayName,
+      employeeCode,
       phone,
       jobTitle,
       company,
@@ -184,17 +187,35 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
+          <div className="sm:col-span-2">
             <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
-              الاسم الكامل
+              الاسم الكامل <span className="text-red-600">*</span>
             </label>
             <input
               type="text"
               required
+              minLength={SCHEMA_LIMITS.USER_NAME_MIN}
               maxLength={SCHEMA_LIMITS.USER_NAME_MAX}
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
               className="w-full min-h-[44px] rounded-xl border border-zinc-200 dark:border-zinc-700 bg-stone-50 dark:bg-zinc-950 px-3.5 text-sm text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-600"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1.5">
+              الكود الوظيفي <span className="text-red-600">*</span>
+            </label>
+            <input
+              type="text"
+              dir="ltr"
+              required
+              minLength={SCHEMA_LIMITS.USER_EMPLOYEE_CODE_MIN}
+              maxLength={SCHEMA_LIMITS.USER_EMPLOYEE_CODE_MAX}
+              value={employeeCode}
+              onChange={(e) => setEmployeeCode(e.target.value)}
+              placeholder="مثال: 10245"
+              className="w-full min-h-[44px] rounded-xl border border-zinc-200 dark:border-zinc-700 bg-stone-50 dark:bg-zinc-950 px-3.5 text-sm font-mono-nums text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-600"
             />
           </div>
 

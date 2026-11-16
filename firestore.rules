@@ -95,13 +95,13 @@ service cloud.firestore {
 
     function isValidUserProfile(data) {
       return data.keys().hasAll([
-        'uid', 'email', 'displayName', 'phone', 'jobTitle', 'company',
+        'uid', 'email', 'displayName', 'employeeCode', 'phone', 'jobTitle', 'company',
         'photoURL', 'role', 'approvalStatus', 'profileCompleted',
         'notificationsEnabled', 'platformInfo', 'totalLaunches',
         'lastActiveAt', 'createdAt'
       ])
       && data.keys().hasOnly([
-        'uid', 'email', 'displayName', 'phone', 'jobTitle', 'company',
+        'uid', 'email', 'displayName', 'employeeCode', 'phone', 'jobTitle', 'company',
         'photoURL', 'role', 'approvalStatus', 'profileCompleted',
         'notificationsEnabled', 'platformInfo', 'totalLaunches',
         'lastActiveAt', 'createdAt'
@@ -109,6 +109,7 @@ service cloud.firestore {
       && isValidId(data.uid)
       && data.email is string && data.email.size() >= 3 && data.email.size() <= 150
       && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100
+      && data.employeeCode is string && data.employeeCode.size() <= 30
       && data.phone is string && data.phone.size() <= 30
       && data.jobTitle is string && data.jobTitle.size() <= 100
       && data.company is string && data.company.size() <= 100
@@ -119,6 +120,7 @@ service cloud.firestore {
       && (
         data.profileCompleted == false || (
           data.displayName.size() >= 2
+          && data.employeeCode.size() >= 1
           && data.phone.size() >= 8
           && data.jobTitle.size() >= 2
           && data.company.size() >= 2
@@ -236,7 +238,7 @@ service cloud.firestore {
         && (
           // Tier 1: Admin can update profile fields, role, and approvalStatus
           (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly([
-            'displayName', 'phone', 'jobTitle', 'company', 'photoURL',
+            'displayName', 'employeeCode', 'phone', 'jobTitle', 'company', 'photoURL',
             'role', 'approvalStatus', 'profileCompleted', 'notificationsEnabled',
             'platformInfo', 'totalLaunches', 'lastActiveAt'
           ]))
@@ -251,7 +253,7 @@ service cloud.firestore {
             )
             && (
               (incoming().diff(existing()).affectedKeys().hasOnly([
-                'displayName', 'phone', 'jobTitle', 'company', 'photoURL',
+                'displayName', 'employeeCode', 'phone', 'jobTitle', 'company', 'photoURL',
                 'approvalStatus', 'profileCompleted', 'notificationsEnabled',
                 'platformInfo', 'lastActiveAt'
               ]))

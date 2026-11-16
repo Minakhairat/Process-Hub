@@ -31,6 +31,7 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({ onOpenAuth
     if (res === 'granted' && userProfile) {
       await updateOwnProfile({
         displayName: userProfile.displayName,
+        employeeCode: userProfile.employeeCode || '',
         phone: userProfile.phone,
         jobTitle: userProfile.jobTitle,
         company: userProfile.company,

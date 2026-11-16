@@ -19,6 +19,8 @@ export const SCHEMA_LIMITS = {
   ICON_URL_MAX: 1000,
   USER_NAME_MIN: 2,
   USER_NAME_MAX: 100,
+  USER_EMPLOYEE_CODE_MIN: 1,
+  USER_EMPLOYEE_CODE_MAX: 30,
   USER_PHONE_MIN: 8,
   USER_PHONE_MAX: 30,
   USER_JOB_MIN: 2,
@@ -52,6 +54,7 @@ export interface UserProfile {
   uid: string;
   email: string;
   displayName: string;
+  employeeCode: string;
   phone: string;
   jobTitle: string;
   company: string;

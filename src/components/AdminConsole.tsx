@@ -827,6 +827,10 @@ export const AdminConsole: React.FC = () => {
                         </p>
 
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-600 dark:text-zinc-300">
+                          <span className="font-mono-nums font-bold text-red-700 dark:text-red-400" dir="ltr">
+                            كود: {u.employeeCode || '—'}
+                          </span>
+                          <span aria-hidden="true">·</span>
                           <span className="font-latin" dir="ltr">{u.email}</span>
                           <span aria-hidden="true">·</span>
                           <span className="font-mono-nums" dir="ltr">{u.phone || 'بدون هاتف'}</span>
@@ -882,6 +886,7 @@ export const AdminConsole: React.FC = () => {
                 <thead className="bg-stone-50 dark:bg-zinc-950 text-xs text-zinc-500 dark:text-zinc-400 border-b border-zinc-200 dark:border-zinc-800">
                   <tr>
                     <th className="py-3 px-4 font-semibold">الاسم</th>
+                    <th className="py-3 px-4 font-semibold">الكود الوظيفي</th>
                     <th className="py-3 px-4 font-semibold">البريد الإلكتروني</th>
                     <th className="py-3 px-4 font-semibold">الهاتف</th>
                     <th className="py-3 px-4 font-semibold">الوظيفة / القسم</th>
@@ -898,6 +903,9 @@ export const AdminConsole: React.FC = () => {
                       <tr key={u.uid} className="hover:bg-stone-50/70 dark:hover:bg-zinc-800/40">
                         <td className="py-3 px-4 font-semibold text-zinc-900 dark:text-white whitespace-nowrap">
                           {u.displayName}
+                        </td>
+                        <td className="py-3 px-4 font-mono-nums text-xs font-bold text-red-700 dark:text-red-400 whitespace-nowrap" dir="ltr">
+                          {u.employeeCode || '—'}
                         </td>
                         <td className="py-3 px-4 font-latin text-xs text-zinc-600 dark:text-zinc-300 whitespace-nowrap" dir="ltr">
                           {u.email}
@@ -963,7 +971,7 @@ export const AdminConsole: React.FC = () => {
                   })}
                   {allUsers.length === 0 && (
                     <tr>
-                      <td colSpan={7} className="py-8 text-center text-sm text-zinc-500">
+                      <td colSpan={8} className="py-8 text-center text-sm text-zinc-500">
                         لا يوجد مستخدمون مسجلون بعد.
                       </td>
                     </tr>

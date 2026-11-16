@@ -135,10 +135,15 @@
           "maxLength": 100,
           "description": "User full name."
         },
+        "employeeCode": {
+          "type": "string",
+          "maxLength": 30,
+          "description": "Factory employee / functional ID code."
+        },
         "phone": {
           "type": "string",
           "maxLength": 30,
-          "description": "Optional user phone number."
+          "description": "Required user phone number."
         },
         "jobTitle": {
           "type": "string",
@@ -148,7 +153,7 @@
         "company": {
           "type": "string",
           "maxLength": 100,
-          "description": "User organization or factory name."
+          "description": "User organization or factory department/line."
         },
         "photoURL": {
           "type": "string",
@@ -197,6 +202,7 @@
         "uid",
         "email",
         "displayName",
+        "employeeCode",
         "phone",
         "jobTitle",
         "company",

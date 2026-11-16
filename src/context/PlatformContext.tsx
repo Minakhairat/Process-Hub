@@ -66,6 +66,7 @@ export interface NotificationFormInput {
 
 export interface ProfileUpdateInput {
   displayName: string;
+  employeeCode: string;
   phone: string;
   jobTitle: string;
   company: string;
@@ -142,6 +143,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return (
       Boolean(userProfile.profileCompleted) &&
       userProfile.displayName.trim().length >= SCHEMA_LIMITS.USER_NAME_MIN &&
+      userProfile.employeeCode.trim().length >= SCHEMA_LIMITS.USER_EMPLOYEE_CODE_MIN &&
       userProfile.phone.trim().length >= SCHEMA_LIMITS.USER_PHONE_MIN &&
       userProfile.jobTitle.trim().length >= SCHEMA_LIMITS.USER_JOB_MIN &&
       userProfile.company.trim().length >= SCHEMA_LIMITS.USER_COMPANY_MIN
@@ -202,6 +204,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               (isAdminEmail ? OWNER_INFO.nameAr : user.email?.split('@')[0]) ||
               'مستخدم'
             ).slice(0, SCHEMA_LIMITS.USER_NAME_MAX),
+            employeeCode: isAdminEmail ? 'ADMIN-01' : '',
             phone: isAdminEmail ? OWNER_INFO.phone : '',
             jobTitle: isAdminEmail ? OWNER_INFO.roleAr : '',
             company: isAdminEmail ? OWNER_INFO.companyAr : '',
@@ -223,12 +226,14 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             if (
               existingData.role !== 'admin' ||
               existingData.approvalStatus !== 'approved' ||
-              !existingData.profileCompleted
+              !existingData.profileCompleted ||
+              typeof existingData.employeeCode !== 'string'
             ) {
               await updateDoc(userDocRef, {
                 role: 'admin',
                 approvalStatus: 'approved',
                 profileCompleted: true,
+                employeeCode: existingData.employeeCode?.trim() ? existingData.employeeCode : 'ADMIN-01',
                 phone: existingData.phone?.trim() ? existingData.phone : OWNER_INFO.phone,
                 jobTitle: existingData.jobTitle?.trim() ? existingData.jobTitle : OWNER_INFO.roleAr,
                 company: existingData.company?.trim() ? existingData.company : OWNER_INFO.companyAr,
@@ -243,15 +248,19 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             }
           } else if (
             !existingData.approvalStatus ||
-            typeof existingData.profileCompleted !== 'boolean'
+            typeof existingData.profileCompleted !== 'boolean' ||
+            typeof existingData.employeeCode !== 'string'
           ) {
+            const existingCode = (existingData.employeeCode || '').trim();
             const hasCompleteFields =
               (existingData.displayName || '').trim().length >= SCHEMA_LIMITS.USER_NAME_MIN &&
+              existingCode.length >= SCHEMA_LIMITS.USER_EMPLOYEE_CODE_MIN &&
               (existingData.phone || '').trim().length >= SCHEMA_LIMITS.USER_PHONE_MIN &&
               (existingData.jobTitle || '').trim().length >= SCHEMA_LIMITS.USER_JOB_MIN &&
               (existingData.company || '').trim().length >= SCHEMA_LIMITS.USER_COMPANY_MIN;
 
             await updateDoc(userDocRef, {
+              employeeCode: existingCode,
               approvalStatus: existingData.approvalStatus || 'pending',
               profileCompleted: hasCompleteFields,
               platformInfo,
@@ -280,6 +289,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             uid: raw.uid || user.uid,
             email: raw.email || user.email || '',
             displayName: raw.displayName || user.displayName || 'مستخدم',
+            employeeCode: raw.employeeCode || '',
             phone: raw.phone || '',
             jobTitle: raw.jobTitle || '',
             company: raw.company || '',
@@ -466,6 +476,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             uid: raw.uid || d.id,
             email: raw.email || '',
             displayName: raw.displayName || 'مستخدم',
+            employeeCode: raw.employeeCode || '',
             phone: raw.phone || '',
             jobTitle: raw.jobTitle || '',
             company: raw.company || '',
@@ -587,12 +598,14 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (!user || !isVerified) return;
     const ref = doc(db, 'users', user.uid);
     const cleanName = (input.displayName.trim() || 'مستخدم').slice(0, SCHEMA_LIMITS.USER_NAME_MAX);
+    const cleanEmployeeCode = input.employeeCode.trim().slice(0, SCHEMA_LIMITS.USER_EMPLOYEE_CODE_MAX);
     const cleanPhone = input.phone.trim().slice(0, SCHEMA_LIMITS.USER_PHONE_MAX);
     const cleanJob = input.jobTitle.trim().slice(0, SCHEMA_LIMITS.USER_JOB_MAX);
     const cleanCompany = input.company.trim().slice(0, SCHEMA_LIMITS.USER_COMPANY_MAX);
 
     const complete =
       cleanName.length >= SCHEMA_LIMITS.USER_NAME_MIN &&
+      cleanEmployeeCode.length >= SCHEMA_LIMITS.USER_EMPLOYEE_CODE_MIN &&
       cleanPhone.length >= SCHEMA_LIMITS.USER_PHONE_MIN &&
       cleanJob.length >= SCHEMA_LIMITS.USER_JOB_MIN &&
       cleanCompany.length >= SCHEMA_LIMITS.USER_COMPANY_MIN;
@@ -600,6 +613,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     try {
       await updateDoc(ref, {
         displayName: cleanName,
+        employeeCode: cleanEmployeeCode,
         phone: cleanPhone,
         jobTitle: cleanJob,
         company: cleanCompany,
@@ -620,8 +634,32 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (!isAdmin) return;
     const ref = doc(db, 'users', targetUid);
     try {
+      const snap = await getDoc(ref);
+      const raw = (snap.exists() ? snap.data() : {}) as Partial<UserProfile>;
+      const cleanName = (raw.displayName || 'مستخدم').trim().slice(0, SCHEMA_LIMITS.USER_NAME_MAX) || 'مستخدم';
+      const cleanEmployeeCode = (raw.employeeCode || '').trim().slice(0, SCHEMA_LIMITS.USER_EMPLOYEE_CODE_MAX);
+      const cleanPhone = (raw.phone || '').trim().slice(0, SCHEMA_LIMITS.USER_PHONE_MAX);
+      const cleanJob = (raw.jobTitle || '').trim().slice(0, SCHEMA_LIMITS.USER_JOB_MAX);
+      const cleanCompany = (raw.company || '').trim().slice(0, SCHEMA_LIMITS.USER_COMPANY_MAX);
+      const hasCompleteFields =
+        cleanName.length >= SCHEMA_LIMITS.USER_NAME_MIN &&
+        cleanEmployeeCode.length >= SCHEMA_LIMITS.USER_EMPLOYEE_CODE_MIN &&
+        cleanPhone.length >= SCHEMA_LIMITS.USER_PHONE_MIN &&
+        cleanJob.length >= SCHEMA_LIMITS.USER_JOB_MIN &&
+        cleanCompany.length >= SCHEMA_LIMITS.USER_COMPANY_MIN;
+
       await updateDoc(ref, {
+        displayName: cleanName,
+        employeeCode: cleanEmployeeCode,
+        phone: cleanPhone,
+        jobTitle: cleanJob,
+        company: cleanCompany,
+        photoURL: (raw.photoURL || '').slice(0, 500),
+        role: raw.role === 'admin' ? 'admin' : 'user',
         approvalStatus: status,
+        profileCompleted: hasCompleteFields,
+        notificationsEnabled: Boolean(raw.notificationsEnabled),
+        platformInfo: (raw.platformInfo || 'Web').slice(0, 100),
         lastActiveAt: serverTimestamp(),
       });
     } catch (error) {
