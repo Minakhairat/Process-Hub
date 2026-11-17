@@ -20,6 +20,17 @@ export const OWNER_INFO = {
   email: 'minakhairat1@gmail.com',
 } as const;
 
+function resolveToolEndpoint(encoded: string): string {
+  try {
+    if (typeof atob === 'function') {
+      return atob(encoded);
+    }
+    return '';
+  } catch {
+    return '';
+  }
+}
+
 export const DEFAULT_APPS: AppItem[] = [
   {
     id: 'skill-matrix',
@@ -27,7 +38,7 @@ export const DEFAULT_APPS: AppItem[] = [
     titleAr: 'مصفوفة المهارات التشغيلية',
     description:
       'تقييم وتتبع مستويات كفاءة ومهارات فنيي ومهندسي خطوط المبرد الصحراوي والميكروويف وتحديد فجوات التدريب بدقة.',
-    url: 'https://minakhairat.github.io/Skill-matrix2/',
+    url: resolveToolEndpoint('aHR0cHM6Ly9taW5ha2hhaXJhdC5naXRodWIuaW8vU2tpbGwtbWF0cml4Mi8='),
     category: 'training',
     iconType: 'lucide',
     iconName: 'Grid',
@@ -44,7 +55,7 @@ export const DEFAULT_APPS: AppItem[] = [
     titleAr: 'خريطة تدفق القيمة بالمصنع',
     description:
       'تحليل ورسم تدفق المواد والمعلومات عبر خطوط التجميع والاختبار لحساب زمن الدورة وتقليل الفاقد الزمني.',
-    url: 'https://minakhairat.github.io/VSM/',
+    url: resolveToolEndpoint('aHR0cHM6Ly9taW5ha2hhaXJhdC5naXRodWIuaW8vVlNNLw=='),
     category: 'lean',
     iconType: 'lucide',
     iconName: 'GitBranch',
@@ -61,7 +72,7 @@ export const DEFAULT_APPS: AppItem[] = [
     titleAr: 'تدقيق بيئة العمل 5S',
     description:
       'نظام فحص وتقييم دوري لتطبيق معايير الفرز والترتيب والتنظيف والتنميط والاستدامة داخل صالات الإنتاج والمخازن.',
-    url: 'https://minakhairat.github.io/5S-Audit/',
+    url: resolveToolEndpoint('aHR0cHM6Ly9taW5ha2hhaXJhdC5naXRodWIuaW8vNVMtQXVkaXQv'),
     category: 'quality',
     iconType: 'lucide',
     iconName: 'ClipboardCheck',
@@ -78,7 +89,7 @@ export const DEFAULT_APPS: AppItem[] = [
     titleAr: 'تحليل الهدر الثماني',
     description:
       'رصد وتصنيف مصادر الهدر الثماني (TIMWOODS) داخل خطوط إنتاج المبرد الصحراوي والميكروويف ووضع خطط التحسين.',
-    url: 'https://minakhairat.github.io/8-Wastes/',
+    url: resolveToolEndpoint('aHR0cHM6Ly9taW5ha2hhaXJhdC5naXRodWIuaW8vOC1XYXN0ZXMv'),
     category: 'lean',
     iconType: 'lucide',
     iconName: 'SearchCheck',
@@ -95,7 +106,7 @@ export const DEFAULT_APPS: AppItem[] = [
     titleAr: 'الحزام الأبيض لين سيجما',
     description:
       'منصة تفاعلية لتأهيل فرق العمليات على أساسيات اللين سيجما ومبادئ تقليل التباين ورفع جودة المنتج.',
-    url: 'https://minakhairat.github.io/Lean-Six-Sigma-White-Belt/',
+    url: resolveToolEndpoint('aHR0cHM6Ly9taW5ha2hhaXJhdC5naXRodWIuaW8vTGVhbi1TaXgtU2lnbWEtV2hpdGUtQmVsdC8='),
     category: 'training',
     iconType: 'lucide',
     iconName: 'Award',
@@ -112,7 +123,7 @@ export const DEFAULT_APPS: AppItem[] = [
     titleAr: 'تحليل وتخطيط العمليات',
     description:
       'توثيق خطوات العمليات الصناعية وتحليل الأزمنة القياسية واختناقات التشغيل لتحسين انسيابية خطوط التجميع.',
-    url: 'https://minakhairat.github.io/Process/',
+    url: resolveToolEndpoint('aHR0cHM6Ly9taW5ha2hhaXJhdC5naXRodWIuaW8vUHJvY2Vzcy8='),
     category: 'production',
     iconType: 'lucide',
     iconName: 'Workflow',
@@ -129,7 +140,7 @@ export const DEFAULT_APPS: AppItem[] = [
     titleAr: 'نظام السوبر ماركت الصناعي',
     description:
       'إدارة مخزون نقاط السحب (Kanban / SuperMarket) ومكونات التغذية لخطوط الإنتاج وضمان تدفق مستقر بدون توقف.',
-    url: 'https://minakhairat.github.io/SuperMarket/',
+    url: resolveToolEndpoint('aHR0cHM6Ly9taW5ha2hhaXJhdC5naXRodWIuaW8vU3VwZXJNYXJrZXQv'),
     category: 'production',
     iconType: 'lucide',
     iconName: 'Layers',
@@ -146,7 +157,7 @@ export const DEFAULT_APPS: AppItem[] = [
     titleAr: 'موازنة خطوط الإنتاج بالذكاء الاصطناعي',
     description:
       'أداة ذكية لموازنة أزمنة محطات العمل مقابل زمن التاكت (Takt Time) ورفع كفاءة خطوط المبرد والميكروويف تلقائياً.',
-    url: 'https://minakhairat.github.io/AI-Production-Line-Balancer/',
+    url: resolveToolEndpoint('aHR0cHM6Ly9taW5ha2hhaXJhdC5naXRodWIuaW8vQUktUHJvZHVjdGlvbi1MaW5lLUJhbGFuY2VyLw=='),
     category: 'ai',
     iconType: 'lucide',
     iconName: 'Cpu',

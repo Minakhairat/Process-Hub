@@ -1,11 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  ArrowUpLeft,
-  Check,
-  Clock,
-  Copy,
   Factory,
   Layers,
+  Lock,
   Mail,
   MessageCircle,
   MonitorPlay,
@@ -13,12 +10,11 @@ import {
   Search,
   ShieldCheck,
   Square,
-  X,
 } from 'lucide-react';
 import { OWNER_INFO } from '../data/defaultApps';
 import heroFactoryImg from '../assets/images/hero_fresh_factory_1794650867727.jpg';
 import { usePlatform } from '../context/PlatformContext';
-import { CATEGORY_LABELS, type AppCategory, type AppItem } from '../types/platform';
+import { CATEGORY_LABELS, type AppCategory } from '../types/platform';
 import { formatDurationAr } from '../utils/device';
 import { AppIcon } from './AppIcon';
 import { FreshLogo } from './FreshLogo';
@@ -45,15 +41,13 @@ export const AppsCatalogView: React.FC<AppsCatalogViewProps> = ({ onOpenAuth }) 
     isAdmin,
     userProfile,
     activeToolSession,
-    trackAppLaunch,
+    activeEmbeddedApp,
+    openToolInPlatform,
     finishActiveToolSession,
-    logInstantAction,
   } = usePlatform();
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<'all' | AppCategory>('all');
-  const [copiedId, setCopiedId] = useState<string | null>(null);
   const [heroImgError, setHeroImgError] = useState(false);
-  const [embeddedApp, setEmbeddedApp] = useState<AppItem | null>(null);
   const [elapsedSec, setElapsedSec] = useState(0);
 
   useEffect(() => {
@@ -90,26 +84,10 @@ export const AppsCatalogView: React.FC<AppsCatalogViewProps> = ({ onOpenAuth }) 
     [apps, isAdmin]
   );
 
-  const handleCopyUrl = async (app: AppItem) => {
-    try {
-      await navigator.clipboard.writeText(app.url);
-      setCopiedId(app.id);
-      logInstantAction(app.id, app.title, 'copy_link', `نسخ رابط ${app.titleAr}`);
-      setTimeout(() => setCopiedId((prev) => (prev === app.id ? null : prev)), 2000);
-    } catch {
-      // Clipboard blocked in restricted context
-    }
-  };
-
-  const handleOpenEmbedded = (app: AppItem) => {
-    setEmbeddedApp(app);
-    trackAppLaunch(app, 'embedded_launch');
-  };
-
-  const handleCloseEmbedded = async () => {
-    setEmbeddedApp(null);
-    await finishActiveToolSession();
-  };
+  const activeSessionApp = useMemo(() => {
+    if (!activeToolSession) return null;
+    return apps.find((a) => a.id === activeToolSession.appId) || null;
+  }, [apps, activeToolSession]);
 
   return (
     <div className="space-y-8 pb-8">
@@ -231,11 +209,10 @@ export const AppsCatalogView: React.FC<AppsCatalogViewProps> = ({ onOpenAuth }) 
         </div>
       </section>
 
-      {/* Active Session Status Bar (when working in an external or embedded tool) */}
-      {activeToolSession && !embeddedApp && (
+      {/* Active Session Status Bar */}
+      {activeToolSession && !activeEmbeddedApp && (
         <div className="rounded-2xl border border-emerald-200 dark:border-emerald-800/70 bg-emerald-50/70 dark:bg-emerald-950/25 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
-            <span className="h-2.5 w-2.5 rounded-full bg-emerald-600 animate-pulse shrink-0" />
             <div className="min-w-0">
               <p className="text-xs font-bold text-emerald-900 dark:text-emerald-200 truncate">
                 جلسة عمل نشطة: {activeToolSession.appTitleAr || activeToolSession.appTitle}
@@ -246,14 +223,27 @@ export const AppsCatalogView: React.FC<AppsCatalogViewProps> = ({ onOpenAuth }) 
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={() => void finishActiveToolSession()}
-            className="min-h-[38px] inline-flex items-center gap-1.5 rounded-xl border border-emerald-300 dark:border-emerald-700 bg-white dark:bg-zinc-900 px-3.5 py-1.5 text-xs font-semibold text-emerald-800 dark:text-emerald-200 hover:bg-emerald-100 dark:hover:bg-emerald-950/60 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-          >
-            <Square className="h-3.5 w-3.5" />
-            <span>إنهاء وحفظ الوقت</span>
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            {activeSessionApp && (
+              <button
+                type="button"
+                onClick={() => openToolInPlatform(activeSessionApp)}
+                className="min-h-[38px] inline-flex items-center gap-1.5 rounded-xl bg-emerald-700 text-white px-3.5 py-1.5 text-xs font-semibold hover:bg-emerald-800 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                <MonitorPlay className="h-3.5 w-3.5" />
+                <span>العودة للأداة</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => void finishActiveToolSession()}
+              className="min-h-[38px] inline-flex items-center gap-1.5 rounded-xl border border-emerald-300 dark:border-emerald-700 bg-white dark:bg-zinc-900 px-3.5 py-1.5 text-xs font-semibold text-emerald-800 dark:text-emerald-200 hover:bg-emerald-100 dark:hover:bg-emerald-950/60 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            >
+              <Square className="h-3.5 w-3.5" />
+              <span>إنهاء وحفظ الوقت</span>
+            </button>
+          </div>
         </div>
       )}
 
@@ -347,10 +337,14 @@ export const AppsCatalogView: React.FC<AppsCatalogViewProps> = ({ onOpenAuth }) 
             </button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+          <div
+            onContextMenu={(e) => e.preventDefault()}
+            className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 select-none"
+          >
             {visibleApps.map((app, index) => (
               <article
                 key={app.id}
+                draggable={false}
                 className="group rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 flex flex-col justify-between gap-5 transition-colors hover:border-red-400 dark:hover:border-red-700"
               >
                 <div className="space-y-4">
@@ -392,41 +386,16 @@ export const AppsCatalogView: React.FC<AppsCatalogViewProps> = ({ onOpenAuth }) 
                   </p>
                 </div>
 
-                <div className="flex items-center gap-2 pt-3 border-t border-zinc-100 dark:border-zinc-800">
-                  <a
-                    href={app.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={() => trackAppLaunch(app, 'launch')}
-                    className="flex-1 min-h-[44px] inline-flex items-center justify-center gap-2 rounded-xl bg-zinc-900 dark:bg-red-600 px-3.5 py-2 text-sm font-semibold text-white hover:bg-red-600 dark:hover:bg-red-500 transition-colors whitespace-nowrap"
-                  >
-                    <span>فتح الأداة</span>
-                    <ArrowUpLeft className="h-4 w-4" />
-                  </a>
-
+                <div className="flex items-center justify-between gap-3 pt-3 border-t border-zinc-100 dark:border-zinc-800">
                   <button
                     type="button"
-                    onClick={() => handleOpenEmbedded(app)}
-                    title="تشغيل الأداة داخل المنصة مع تتبع الوقت"
-                    aria-label={`تشغيل ${app.title} داخل المنصة`}
-                    className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center gap-1.5 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-stone-50 dark:bg-zinc-800 px-3 text-xs font-semibold text-zinc-700 dark:text-zinc-200 hover:bg-red-50 hover:text-red-700 hover:border-red-200 dark:hover:bg-zinc-700 transition-colors cursor-pointer shrink-0 whitespace-nowrap"
+                    draggable={false}
+                    onClick={() => openToolInPlatform(app)}
+                    className="flex-1 min-h-[44px] inline-flex items-center justify-center gap-2 rounded-xl bg-zinc-900 dark:bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-600 dark:hover:bg-red-500 transition-colors whitespace-nowrap cursor-pointer"
                   >
                     <MonitorPlay className="h-4 w-4" />
-                    <span className="hidden sm:inline">داخل المنصة</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => void handleCopyUrl(app)}
-                    title="نسخ رابط الأداة"
-                    aria-label={`نسخ رابط ${app.title}`}
-                    className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center rounded-xl border border-zinc-200 dark:border-zinc-700 bg-stone-50 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 hover:bg-red-50 hover:text-red-700 hover:border-red-200 dark:hover:bg-zinc-700 transition-colors cursor-pointer shrink-0"
-                  >
-                    {copiedId === app.id ? (
-                      <Check className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-                    ) : (
-                      <Copy className="h-4 w-4" />
-                    )}
+                    <span>تشغيل الأداة داخل المنصة</span>
+                    <Lock className="h-3.5 w-3.5 opacity-80" />
                   </button>
                 </div>
               </article>
@@ -488,78 +457,6 @@ export const AppsCatalogView: React.FC<AppsCatalogViewProps> = ({ onOpenAuth }) 
         </div>
       </section>
 
-      {/* Embedded Tool Workspace Modal */}
-      {embeddedApp && (
-        <div
-          className="fixed inset-0 z-50 bg-zinc-950/80 backdrop-blur-sm p-2 sm:p-4 flex items-center justify-center"
-          role="dialog"
-          aria-modal="true"
-          aria-label={embeddedApp.titleAr}
-        >
-          <div className="w-full h-full max-w-6xl max-h-[92vh] rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-hidden flex flex-col shadow-2xl">
-            <div className="px-4 py-3 border-b border-zinc-200 dark:border-zinc-800 bg-stone-50 dark:bg-zinc-950 flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-3 min-w-0">
-                <AppIcon
-                  iconType={embeddedApp.iconType}
-                  iconName={embeddedApp.iconName}
-                  iconUrl={embeddedApp.iconUrl}
-                  accentColor={embeddedApp.accentColor}
-                  alt={embeddedApp.title}
-                  size="sm"
-                />
-                <div className="min-w-0">
-                  <h3 className="text-sm font-bold text-zinc-900 dark:text-white truncate">
-                    {embeddedApp.titleAr} ·{' '}
-                    <span className="font-latin text-xs text-zinc-500 dark:text-zinc-400">
-                      {embeddedApp.title}
-                    </span>
-                  </h3>
-                  <div className="flex items-center gap-2 text-[11px] text-emerald-700 dark:text-emerald-400 font-mono-nums">
-                    <Clock className="h-3.5 w-3.5" />
-                    <span>وقت الجلسة المباشر: {formatDurationAr(elapsedSec)}</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 shrink-0">
-                <a
-                  href={embeddedApp.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="min-h-[38px] inline-flex items-center gap-1.5 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-1.5 text-xs font-semibold text-zinc-700 dark:text-zinc-200 hover:border-red-300 transition-colors whitespace-nowrap"
-                >
-                  <span>فتح في نافذة مستقلة</span>
-                  <ArrowUpLeft className="h-3.5 w-3.5" />
-                </a>
-
-                <button
-                  type="button"
-                  onClick={() => void handleCloseEmbedded()}
-                  className="min-h-[38px] inline-flex items-center gap-1.5 rounded-xl bg-red-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-red-700 transition-colors whitespace-nowrap cursor-pointer"
-                >
-                  <X className="h-3.5 w-3.5" />
-                  <span>إنهاء الجلسة وإغلاق</span>
-                </button>
-              </div>
-            </div>
-
-            <div className="px-4 py-1.5 bg-zinc-100 dark:bg-zinc-900/90 border-b border-zinc-200 dark:border-zinc-800 text-[11px] text-zinc-500 dark:text-zinc-400 flex items-center justify-between gap-2">
-              <span>
-                إذا لم تظهر الأداة داخل الإطار بسبب إعدادات الأمان في الموقع الخارجي، اضغط على «فتح في نافذة مستقلة» وسيظل حساب الوقت مستمراً.
-              </span>
-            </div>
-
-            <div className="flex-1 bg-white dark:bg-zinc-950 relative">
-              <iframe
-                src={embeddedApp.url}
-                title={embeddedApp.titleAr}
-                className="w-full h-full border-0"
-                allow="clipboard-read; clipboard-write; fullscreen"
-              />
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

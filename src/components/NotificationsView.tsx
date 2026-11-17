@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ArrowUpLeft, Bell, BellRing, CheckCheck, ShieldAlert } from 'lucide-react';
+import { Bell, BellRing, CheckCheck, MonitorPlay, ShieldAlert } from 'lucide-react';
 import { usePlatform } from '../context/PlatformContext';
 import { OWNER_INFO } from '../data/defaultApps';
 import { NOTIFICATION_TYPE_LABELS } from '../types/platform';
@@ -18,6 +18,7 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({ onOpenAuth
     unreadCount,
     markNotificationRead,
     markAllNotificationsRead,
+    openToolByRef,
     userProfile,
     updateOwnProfile,
   } = usePlatform();
@@ -191,20 +192,19 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({ onOpenAuth
                     </p>
                   </div>
 
-                  {notif.targetAppUrl && (
-                    <a
-                      href={notif.targetAppUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                  {(notif.targetAppUrl || notif.targetAppTitle) && (
+                    <button
+                      type="button"
                       onClick={(e) => {
                         e.stopPropagation();
                         void markNotificationRead(notif.id);
+                        openToolByRef(notif.targetAppUrl, notif.targetAppTitle);
                       }}
-                      className="min-h-[40px] inline-flex items-center justify-center gap-1.5 rounded-xl bg-zinc-900 dark:bg-red-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-red-600 dark:hover:bg-red-500 transition-colors whitespace-nowrap shrink-0 self-start"
+                      className="min-h-[40px] inline-flex items-center justify-center gap-1.5 rounded-xl bg-zinc-900 dark:bg-red-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-red-600 dark:hover:bg-red-500 transition-colors whitespace-nowrap shrink-0 self-start cursor-pointer"
                     >
-                      <span>{notif.targetAppTitle || 'فتح الأداة'}</span>
-                      <ArrowUpLeft className="h-3.5 w-3.5" />
-                    </a>
+                      <MonitorPlay className="h-3.5 w-3.5" />
+                      <span>{notif.targetAppTitle || 'فتح الأداة داخل المنصة'}</span>
+                    </button>
                   )}
                 </div>
               </article>

@@ -9,6 +9,7 @@ import { FreshLogo } from './components/FreshLogo';
 import { NotificationsView } from './components/NotificationsView';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { ProfileView } from './components/ProfileView';
+import { ToolWorkspaceModal } from './components/ToolWorkspaceModal';
 import { PlatformProvider, usePlatform } from './context/PlatformContext';
 import { OWNER_INFO } from './data/defaultApps';
 
@@ -29,6 +30,7 @@ const PlatformShell: React.FC = () => {
     latestToast,
     dismissLatestToast,
     markNotificationRead,
+    openToolByRef,
   } = usePlatform();
 
   const [section, setSection] = useState<ActiveSection>('apps');
@@ -285,7 +287,20 @@ const PlatformShell: React.FC = () => {
                 <p className="mt-1 text-xs text-zinc-600 dark:text-zinc-300 line-clamp-2">
                   {latestToast.body}
                 </p>
-                <div className="mt-3 flex items-center gap-2">
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  {(latestToast.targetAppUrl || latestToast.targetAppTitle) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void markNotificationRead(latestToast.id);
+                        openToolByRef(latestToast.targetAppUrl, latestToast.targetAppTitle);
+                        dismissLatestToast();
+                      }}
+                      className="min-h-[34px] px-3 py-1 rounded-lg bg-zinc-900 dark:bg-zinc-800 text-white text-xs font-semibold hover:bg-zinc-800 dark:hover:bg-zinc-700 cursor-pointer whitespace-nowrap"
+                    >
+                      تشغيل الأداة
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => {
@@ -293,7 +308,7 @@ const PlatformShell: React.FC = () => {
                       setSection('notifications');
                       dismissLatestToast();
                     }}
-                    className="min-h-[34px] px-3 py-1 rounded-lg bg-red-600 text-white text-xs font-semibold hover:bg-red-700 cursor-pointer"
+                    className="min-h-[34px] px-3 py-1 rounded-lg bg-red-600 text-white text-xs font-semibold hover:bg-red-700 cursor-pointer whitespace-nowrap"
                   >
                     عرض التفاصيل
                   </button>
@@ -319,6 +334,7 @@ const PlatformShell: React.FC = () => {
         </div>
       )}
 
+      <ToolWorkspaceModal />
       <AuthModal isOpen={authModalOpen} onClose={() => setAuthModalOpen(false)} />
       <OfflineIndicator />
     </div>

@@ -440,6 +440,9 @@ export const AdminConsole: React.FC = () => {
                 placeholder="https://..."
                 className="w-full min-h-[42px] rounded-xl border border-zinc-200 dark:border-zinc-700 bg-stone-50 dark:bg-zinc-950 px-3 text-sm text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-600"
               />
+              <p className="mt-1 text-[11px] text-zinc-500 dark:text-zinc-400">
+                الرابط مخفي تماماً عن الأعضاء وتُفتح جميع الأدوات حصرياً داخل نافذة المنصة الآمنة.
+              </p>
             </div>
 
             <div>

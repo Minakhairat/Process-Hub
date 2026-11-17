@@ -154,6 +154,10 @@ interface PlatformContextValue {
   invitedUsers: InvitedUser[];
   activityLogs: ActivityLog[];
   activeToolSession: ActiveToolSession | null;
+  activeEmbeddedApp: AppItem | null;
+  openToolInPlatform: (app: AppItem) => void;
+  openToolByRef: (url?: string, title?: string) => boolean;
+  closeToolInPlatform: () => Promise<void>;
   biometricSupported: boolean;
   biometricAvailable: boolean;
   biometricDevices: BiometricDevice[];
@@ -237,6 +241,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [invitedUsers, setInvitedUsers] = useState<InvitedUser[]>([]);
   const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
   const [activeToolSession, setActiveToolSession] = useState<ActiveToolSession | null>(null);
+  const [activeEmbeddedApp, setActiveEmbeddedApp] = useState<AppItem | null>(null);
   const [biometricSupported] = useState(() => isWebAuthnSupported());
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [biometricDevices, setBiometricDevices] = useState<BiometricDevice[]>([]);
@@ -736,7 +741,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               seenNotifIdsRef.current.add(n.id);
               if (doesUserMatchNotification(userProfileRef.current, n, isAdmin)) {
                 setLatestToast(n);
-                void dispatchDeviceNotification(n.title, n.body, n.targetAppUrl || undefined);
+                void dispatchDeviceNotification(n.title, n.body);
               }
               break;
             }
@@ -1019,6 +1024,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const lockWithBiometrics = () => {
     const current = getLocalBiometricBinding();
     if (!current || !user || current.uid !== user.uid) return;
+    setActiveEmbeddedApp(null);
     setBiometricLockState(true);
     setBiometricLocked(true);
   };
@@ -1155,6 +1161,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const signOutUser = async () => {
+    setActiveEmbeddedApp(null);
     await finishActiveToolSession();
     await signOut(auth);
   };
@@ -1661,6 +1668,41 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return allUsers.filter((u) => u.role !== 'admin' && u.approvalStatus === 'pending').length;
   }, [allUsers]);
 
+  const openToolInPlatform = useCallback(
+    (appItem: AppItem) => {
+      if (!isApproved || biometricLocked) return;
+      if (!isAdmin && !appItem.isActive) return;
+      setActiveEmbeddedApp(appItem);
+      trackAppLaunch(appItem, 'embedded_launch');
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [isApproved, biometricLocked, isAdmin, user, isVerified, userProfile]
+  );
+
+  const openToolByRef = useCallback(
+    (url?: string, title?: string): boolean => {
+      if (!isApproved || biometricLocked) return false;
+      const cleanUrl = (url || '').trim();
+      const cleanTitle = (title || '').trim().toLowerCase();
+      const matched = effectiveApps.find((a) => {
+        if (!isAdmin && !a.isActive) return false;
+        if (cleanUrl && a.url.trim() === cleanUrl) return true;
+        if (cleanTitle && a.title.trim().toLowerCase() === cleanTitle) return true;
+        return false;
+      });
+      if (!matched) return false;
+      openToolInPlatform(matched);
+      return true;
+    },
+    [effectiveApps, isApproved, biometricLocked, isAdmin, openToolInPlatform]
+  );
+
+  const closeToolInPlatform = useCallback(async () => {
+    setActiveEmbeddedApp(null);
+    await finishActiveToolSession();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
   const value: PlatformContextValue = {
     authReady,
     profileLoading,
@@ -1685,6 +1727,10 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     invitedUsers,
     activityLogs,
     activeToolSession,
+    activeEmbeddedApp,
+    openToolInPlatform,
+    openToolByRef,
+    closeToolInPlatform,
     biometricSupported,
     biometricAvailable,
     biometricDevices,
