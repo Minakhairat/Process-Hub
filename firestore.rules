@@ -12,7 +12,7 @@ service cloud.firestore {
     // Global Hardened Helpers
     // -------------------------------------------------------------------------
     function isValidId(id) {
-      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+      return id is string && id.size() >= 1 && id.size() <= 160 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
     function incoming() {
@@ -45,6 +45,20 @@ service cloud.firestore {
 
     function isOwner(userId) {
       return isVerifiedUser() && request.auth.uid == userId;
+    }
+
+    function callerEmailKey() {
+      return request.auth.token.email.lower().replace('[^a-z0-9_-]', '_');
+    }
+
+    function hasInvitedRecord() {
+      return isVerifiedUser()
+        && ('email' in request.auth.token)
+        && exists(/databases/$(database)/documents/invitedUsers/$(callerEmailKey()));
+    }
+
+    function invitedRecordData() {
+      return get(/databases/$(database)/documents/invitedUsers/$(callerEmailKey())).data;
     }
 
     // Approved user check for single-doc get and write operations (never used inside allow list)
@@ -89,6 +103,7 @@ service cloud.firestore {
       && data.isActive is bool
       && data.featured is bool
       && isValidId(data.createdBy)
+      && data.createdBy.size() <= 128
       && data.createdAt is timestamp
       && data.updatedAt is timestamp;
     }
@@ -103,10 +118,11 @@ service cloud.firestore {
       && data.keys().hasOnly([
         'uid', 'email', 'displayName', 'employeeCode', 'phone', 'jobTitle', 'company',
         'photoURL', 'role', 'approvalStatus', 'profileCompleted',
-        'notificationsEnabled', 'platformInfo', 'totalLaunches',
-        'lastActiveAt', 'createdAt'
+        'notificationsEnabled', 'platformInfo', 'totalLaunches', 'totalDurationSeconds',
+        'adminNotes', 'customFields', 'lastActiveAt', 'createdAt'
       ])
       && isValidId(data.uid)
+      && data.uid.size() <= 128
       && data.email is string && data.email.size() >= 3 && data.email.size() <= 150
       && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100
       && data.employeeCode is string && data.employeeCode.size() <= 30
@@ -129,8 +145,38 @@ service cloud.firestore {
       && data.notificationsEnabled is bool
       && data.platformInfo is string && data.platformInfo.size() <= 100
       && data.totalLaunches is int && data.totalLaunches >= 0 && data.totalLaunches <= 10000000
+      && (!('totalDurationSeconds' in data) || (data.totalDurationSeconds is int && data.totalDurationSeconds >= 0 && data.totalDurationSeconds <= 100000000))
+      && (!('adminNotes' in data) || (data.adminNotes is string && data.adminNotes.size() <= 1000))
+      && (!('customFields' in data) || (data.customFields is map && data.customFields.size() <= 25))
       && data.lastActiveAt is timestamp
       && data.createdAt is timestamp;
+    }
+
+    function isValidInvitedUser(data) {
+      return data.keys().hasAll([
+        'id', 'email', 'displayName', 'employeeCode', 'phone', 'jobTitle', 'company',
+        'role', 'approvalStatus', 'adminNotes', 'customFields', 'createdBy', 'createdAt', 'updatedAt'
+      ])
+      && data.keys().hasOnly([
+        'id', 'email', 'displayName', 'employeeCode', 'phone', 'jobTitle', 'company',
+        'role', 'approvalStatus', 'adminNotes', 'customFields', 'createdBy', 'createdAt', 'updatedAt'
+      ])
+      && isValidId(data.id)
+      && data.id.size() >= 3
+      && data.email is string && data.email.size() >= 3 && data.email.size() <= 150
+      && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100
+      && data.employeeCode is string && data.employeeCode.size() <= 30
+      && data.phone is string && data.phone.size() <= 30
+      && data.jobTitle is string && data.jobTitle.size() <= 100
+      && data.company is string && data.company.size() <= 100
+      && data.role in ['user', 'admin']
+      && data.approvalStatus in ['pending', 'approved', 'rejected']
+      && data.adminNotes is string && data.adminNotes.size() <= 1000
+      && data.customFields is map && data.customFields.size() <= 25
+      && isValidId(data.createdBy)
+      && data.createdBy.size() <= 128
+      && data.createdAt is timestamp
+      && data.updatedAt is timestamp;
     }
 
     function isValidReadReceipt(data) {
@@ -169,16 +215,23 @@ service cloud.firestore {
       ])
       && data.keys().hasOnly([
         'userId', 'userEmail', 'userName', 'appId',
-        'appTitle', 'deviceType', 'createdAt'
+        'appTitle', 'deviceType', 'action', 'details',
+        'durationSeconds', 'sessionStatus', 'createdAt', 'updatedAt'
       ])
       && isValidId(data.userId)
+      && data.userId.size() <= 128
       && data.userEmail is string && data.userEmail.size() >= 3 && data.userEmail.size() <= 150
       && data.userName is string && data.userName.size() >= 1 && data.userName.size() <= 100
       && isValidId(data.appId)
       && data.appId.size() <= 64
       && data.appTitle is string && data.appTitle.size() >= 1 && data.appTitle.size() <= 100
       && data.deviceType is string && data.deviceType.size() >= 1 && data.deviceType.size() <= 60
-      && data.createdAt is timestamp;
+      && (!('action' in data) || data.action in ['launch', 'embedded_launch', 'copy_link', 'profile_update', 'notification_read'])
+      && (!('details' in data) || (data.details is string && data.details.size() <= 300))
+      && (!('durationSeconds' in data) || (data.durationSeconds is int && data.durationSeconds >= 0 && data.durationSeconds <= 28800))
+      && (!('sessionStatus' in data) || data.sessionStatus in ['active', 'completed', 'instant'])
+      && data.createdAt is timestamp
+      && (!('updatedAt' in data) || data.updatedAt is timestamp);
     }
 
     // -------------------------------------------------------------------------
@@ -187,11 +240,12 @@ service cloud.firestore {
 
     // 1. Applications Catalog (/apps/{appId}) - Locked Behind Auth & Admin Approval
     match /apps/{appId} {
-      allow get: if isValidId(appId) && isApprovedUser() && (resource.data.isActive == true || isAdmin());
+      allow get: if isValidId(appId) && appId.size() <= 64 && isApprovedUser() && (resource.data.isActive == true || isAdmin());
       allow list: if isVerifiedUser() && (resource.data.isActive == true || isBootstrappedAdmin());
 
       allow create: if isAdmin()
         && isValidId(appId)
+        && appId.size() <= 64
         && isValidAppItem(incoming())
         && incoming().id == appId
         && incoming().createdBy == request.auth.uid
@@ -200,6 +254,7 @@ service cloud.firestore {
 
       allow update: if isAdmin()
         && isValidId(appId)
+        && appId.size() <= 64
         && isValidAppItem(incoming())
         && incoming().id == existing().id
         && incoming().createdBy == existing().createdBy
@@ -211,39 +266,57 @@ service cloud.firestore {
           'isActive', 'featured', 'updatedAt'
         ]);
 
-      allow delete: if isAdmin() && isValidId(appId);
+      allow delete: if isAdmin() && isValidId(appId) && appId.size() <= 64;
     }
 
-    // 2. Users Collection (/users/{userId}) - Strict PII Isolation & Admin Approval Gate
+    // 2. Users Collection (/users/{userId}) - Strict PII Isolation & Admin Control
     match /users/{userId} {
-      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow get: if isValidId(userId) && userId.size() <= 128 && (isOwner(userId) || isAdmin());
       allow list: if isBootstrappedAdmin();
 
       allow create: if isOwner(userId)
         && isValidId(userId)
+        && userId.size() <= 128
         && isValidUserProfile(incoming())
         && incoming().uid == request.auth.uid
-        && (incoming().role == 'user' || (isBootstrappedAdmin() && incoming().role == 'admin'))
-        && (incoming().approvalStatus == 'pending' || (isBootstrappedAdmin() && incoming().approvalStatus == 'approved'))
         && incoming().totalLaunches == 0
+        && (!('totalDurationSeconds' in incoming()) || incoming().totalDurationSeconds == 0)
         && incoming().createdAt == request.time
-        && incoming().lastActiveAt == request.time;
+        && incoming().lastActiveAt == request.time
+        && (
+          isBootstrappedAdmin()
+          || (
+            hasInvitedRecord()
+            && incoming().role == invitedRecordData().role
+            && incoming().approvalStatus == invitedRecordData().approvalStatus
+            && (!('adminNotes' in incoming()) || incoming().adminNotes == invitedRecordData().adminNotes)
+            && (!('customFields' in incoming()) || incoming().customFields == invitedRecordData().customFields)
+          )
+          || (
+            incoming().role == 'user'
+            && incoming().approvalStatus == 'pending'
+            && (!('adminNotes' in incoming()) || incoming().adminNotes == '')
+            && (!('customFields' in incoming()) || incoming().customFields.size() == 0)
+          )
+        );
 
       allow update: if isValidId(userId)
+        && userId.size() <= 128
         && isVerifiedUser()
         && isValidUserProfile(incoming())
         && incoming().uid == existing().uid
         && incoming().createdAt == existing().createdAt
         && incoming().lastActiveAt == request.time
         && (
-          // Tier 1: Admin can update profile fields, role, and approvalStatus
+          // Tier 1: Admin can edit all profile fields, notes, customFields, role, and approvalStatus
           (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly([
             'displayName', 'employeeCode', 'phone', 'jobTitle', 'company', 'photoURL',
             'role', 'approvalStatus', 'profileCompleted', 'notificationsEnabled',
-            'platformInfo', 'totalLaunches', 'lastActiveAt'
+            'platformInfo', 'totalLaunches', 'totalDurationSeconds',
+            'adminNotes', 'customFields', 'lastActiveAt'
           ]))
           ||
-          // Tier 2: Owner can complete/update their profile (cannot change role, email, or approvalStatus)
+          // Tier 2: Owner can update their own standard profile OR increment usage stats
           (isOwner(userId)
             && incoming().role == existing().role
             && incoming().email == existing().email
@@ -258,25 +331,32 @@ service cloud.firestore {
                 'platformInfo', 'lastActiveAt'
               ]))
               ||
-              (isApprovedUser() && incoming().diff(existing()).affectedKeys().hasOnly([
-                'totalLaunches', 'platformInfo', 'lastActiveAt'
-              ]) && incoming().totalLaunches == existing().totalLaunches + 1)
+              (isApprovedUser()
+                && incoming().diff(existing()).affectedKeys().hasOnly([
+                  'totalLaunches', 'totalDurationSeconds', 'platformInfo', 'lastActiveAt'
+                ])
+                && (!('totalLaunches' in incoming().diff(existing()).affectedKeys()) || incoming().totalLaunches == existing().totalLaunches + 1)
+                && (!('totalDurationSeconds' in incoming().diff(existing()).affectedKeys()) || (
+                  (!('totalDurationSeconds' in existing()) && incoming().totalDurationSeconds >= 0 && incoming().totalDurationSeconds <= 28800)
+                  || (('totalDurationSeconds' in existing()) && incoming().totalDurationSeconds >= existing().totalDurationSeconds && incoming().totalDurationSeconds <= existing().totalDurationSeconds + 28800)
+                ))
+              )
             )
           )
         );
 
-      allow delete: if isAdmin() && isValidId(userId);
+      allow delete: if isAdmin() && isValidId(userId) && userId.size() <= 128;
 
       // Master Gate Subcollection: Read Notification Receipts
       match /readNotifications/{notificationId} {
-        allow get: if isValidId(userId) && isValidId(notificationId)
+        allow get: if isValidId(userId) && userId.size() <= 128 && isValidId(notificationId) && notificationId.size() <= 64
           && (isOwner(userId) || isAdmin())
           && exists(/databases/$(database)/documents/users/$(userId));
 
-        allow list: if isValidId(userId)
+        allow list: if isValidId(userId) && userId.size() <= 128
           && (isOwner(userId) || isBootstrappedAdmin());
 
-        allow create: if isValidId(userId) && isValidId(notificationId)
+        allow create: if isValidId(userId) && userId.size() <= 128 && isValidId(notificationId) && notificationId.size() <= 64
           && isOwner(userId)
           && isApprovedUser()
           && exists(/databases/$(database)/documents/users/$(userId))
@@ -285,23 +365,58 @@ service cloud.firestore {
           && incoming().readAt == request.time;
 
         allow update: if false;
-        allow delete: if isValidId(userId) && isValidId(notificationId) && (isOwner(userId) || isAdmin());
+        allow delete: if isValidId(userId) && userId.size() <= 128 && isValidId(notificationId) && notificationId.size() <= 64 && (isOwner(userId) || isAdmin());
       }
+    }
+
+    // 2b. Pre-registered / Invited Users (/invitedUsers/{emailKey})
+    match /invitedUsers/{emailKey} {
+      allow get: if isValidId(emailKey) && (
+        isAdmin()
+        || (isVerifiedUser() && ('email' in request.auth.token) && emailKey == callerEmailKey())
+      );
+      allow list: if isBootstrappedAdmin();
+
+      allow create: if isAdmin()
+        && isValidId(emailKey)
+        && emailKey.size() >= 3
+        && isValidInvitedUser(incoming())
+        && incoming().id == emailKey
+        && incoming().createdBy == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isAdmin()
+        && isValidId(emailKey)
+        && emailKey.size() >= 3
+        && isValidInvitedUser(incoming())
+        && incoming().id == existing().id
+        && incoming().createdBy == existing().createdBy
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'email', 'displayName', 'employeeCode', 'phone', 'jobTitle', 'company',
+          'role', 'approvalStatus', 'adminNotes', 'customFields', 'updatedAt'
+        ]);
+
+      allow delete: if isAdmin() && isValidId(emailKey);
     }
 
     // 3. Broadcast Notifications (/notifications/{notificationId})
     match /notifications/{notificationId} {
-      allow get: if isValidId(notificationId) && isApprovedUser() && (resource.data.isActive == true || isAdmin());
+      allow get: if isValidId(notificationId) && notificationId.size() <= 64 && isApprovedUser() && (resource.data.isActive == true || isAdmin());
       allow list: if isVerifiedUser() && (resource.data.isActive == true || isBootstrappedAdmin());
 
       allow create: if isAdmin()
         && isValidId(notificationId)
+        && notificationId.size() <= 64
         && isValidBroadcastNotification(incoming())
         && incoming().id == notificationId
         && incoming().createdAt == request.time;
 
       allow update: if isAdmin()
         && isValidId(notificationId)
+        && notificationId.size() <= 64
         && isValidBroadcastNotification(incoming())
         && incoming().id == existing().id
         && incoming().createdAt == existing().createdAt
@@ -309,27 +424,45 @@ service cloud.firestore {
           'title', 'body', 'type', 'targetAppUrl', 'targetAppTitle', 'isActive'
         ]);
 
-      allow delete: if isAdmin() && isValidId(notificationId);
+      allow delete: if isAdmin() && isValidId(notificationId) && notificationId.size() <= 64;
     }
 
     // 4. Activity Logs (/activityLogs/{logId})
     match /activityLogs/{logId} {
-      allow get: if isValidId(logId) && isVerifiedUser() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow get: if isValidId(logId) && logId.size() <= 128 && isVerifiedUser() && (resource.data.userId == request.auth.uid || isAdmin());
       allow list: if isVerifiedUser() && (resource.data.userId == request.auth.uid || isBootstrappedAdmin());
 
       allow create: if isApprovedUser()
         && isValidId(logId)
+        && logId.size() <= 128
         && isValidActivityLog(incoming())
         && incoming().userId == request.auth.uid
-        && incoming().createdAt == request.time;
+        && incoming().createdAt == request.time
+        && (!('updatedAt' in incoming()) || incoming().updatedAt == request.time);
 
-      allow update: if false;
-      allow delete: if isAdmin() && isValidId(logId);
+      allow update: if isValidId(logId)
+        && logId.size() <= 128
+        && isApprovedUser()
+        && isValidActivityLog(incoming())
+        && (existing().userId == request.auth.uid || isAdmin())
+        && incoming().userId == existing().userId
+        && incoming().userEmail == existing().userEmail
+        && incoming().userName == existing().userName
+        && incoming().appId == existing().appId
+        && incoming().appTitle == existing().appTitle
+        && incoming().deviceType == existing().deviceType
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'durationSeconds', 'sessionStatus', 'updatedAt'
+        ]);
+
+      allow delete: if isAdmin() && isValidId(logId) && logId.size() <= 128;
     }
 
     // 5. Admins Registry (/admins/{adminId})
     match /admins/{adminId} {
-      allow get: if isValidId(adminId) && isVerifiedUser() && (request.auth.uid == adminId || isAdmin());
+      allow get: if isValidId(adminId) && adminId.size() <= 128 && isVerifiedUser() && (request.auth.uid == adminId || isAdmin());
       allow list, create, update, delete: if false;
     }
   }

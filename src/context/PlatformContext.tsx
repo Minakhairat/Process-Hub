@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   createUserWithEmailAndPassword,
   onAuthStateChanged,
@@ -29,16 +29,25 @@ import { auth, db, googleProvider, handleFirestoreError, OperationType } from '.
 import {
   SCHEMA_LIMITS,
   type AccentColor,
+  type ActivityAction,
   type ActivityLog,
   type AppCategory,
   type AppItem,
   type ApprovalStatus,
   type BroadcastNotification,
   type IconType,
+  type InvitedUser,
   type NotificationType,
   type UserProfile,
+  type UserRole,
 } from '../types/platform';
-import { detectPlatformInfo, dispatchDeviceNotification, sanitizeSlug } from '../utils/device';
+import {
+  detectPlatformInfo,
+  dispatchDeviceNotification,
+  sanitizeCustomFields,
+  sanitizeEmailKey,
+  sanitizeSlug,
+} from '../utils/device';
 
 export interface AppFormInput {
   id?: string;
@@ -73,6 +82,33 @@ export interface ProfileUpdateInput {
   notificationsEnabled: boolean;
 }
 
+export interface AdminUserEditInput {
+  displayName: string;
+  employeeCode: string;
+  phone: string;
+  jobTitle: string;
+  company: string;
+  role: UserRole;
+  approvalStatus: ApprovalStatus;
+  adminNotes: string;
+  customFields: Record<string, string>;
+}
+
+export interface InvitedUserInput extends AdminUserEditInput {
+  email: string;
+}
+
+export interface ActiveToolSession {
+  logId: string;
+  uid: string;
+  appId: string;
+  appTitle: string;
+  appTitleAr: string;
+  startedAt: number;
+  mode: 'launch' | 'embedded_launch';
+  committedSeconds: number;
+}
+
 interface PlatformContextValue {
   authReady: boolean;
   profileLoading: boolean;
@@ -92,16 +128,32 @@ interface PlatformContextValue {
   latestToast: BroadcastNotification | null;
   dismissLatestToast: () => void;
   allUsers: UserProfile[];
+  invitedUsers: InvitedUser[];
   activityLogs: ActivityLog[];
+  activeToolSession: ActiveToolSession | null;
   signInWithGoogle: () => Promise<void>;
   signInWithEmail: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>;
-  registerWithEmail: (name: string, email: string, password: string) => Promise<{ ok: boolean; error?: string; needsVerification?: boolean }>;
+  registerWithEmail: (
+    name: string,
+    email: string,
+    password: string
+  ) => Promise<{ ok: boolean; error?: string; needsVerification?: boolean }>;
   resendVerification: () => Promise<boolean>;
   refreshAuthUser: () => Promise<boolean>;
   signOutUser: () => Promise<void>;
   updateOwnProfile: (input: ProfileUpdateInput) => Promise<void>;
   updateUserApproval: (targetUid: string, status: ApprovalStatus) => Promise<void>;
-  trackAppLaunch: (app: AppItem) => void;
+  saveUserByAdmin: (targetUid: string, input: AdminUserEditInput) => Promise<void>;
+  addOrUpdateInvitedUser: (input: InvitedUserInput) => Promise<'updated_existing' | 'saved_invited'>;
+  removeInvitedUser: (emailKey: string) => Promise<void>;
+  trackAppLaunch: (app: AppItem, mode?: 'launch' | 'embedded_launch') => void;
+  finishActiveToolSession: () => Promise<void>;
+  logInstantAction: (
+    appId: string,
+    appTitle: string,
+    action: Extract<ActivityAction, 'copy_link' | 'profile_update' | 'notification_read'>,
+    details: string
+  ) => void;
   markNotificationRead: (notificationId: string) => Promise<void>;
   markAllNotificationsRead: () => Promise<void>;
   saveApp: (input: AppFormInput) => Promise<void>;
@@ -112,7 +164,25 @@ interface PlatformContextValue {
   removeNotification: (notificationId: string) => Promise<void>;
 }
 
+const SESSION_STORAGE_KEY = 'fresh_ops_active_session_v1';
+
 const PlatformContext = createContext<PlatformContextValue | null>(null);
+
+function hasCompleteProfileFields(fields: {
+  displayName?: string;
+  employeeCode?: string;
+  phone?: string;
+  jobTitle?: string;
+  company?: string;
+}): boolean {
+  return (
+    (fields.displayName || '').trim().length >= SCHEMA_LIMITS.USER_NAME_MIN &&
+    (fields.employeeCode || '').trim().length >= SCHEMA_LIMITS.USER_EMPLOYEE_CODE_MIN &&
+    (fields.phone || '').trim().length >= SCHEMA_LIMITS.USER_PHONE_MIN &&
+    (fields.jobTitle || '').trim().length >= SCHEMA_LIMITS.USER_JOB_MIN &&
+    (fields.company || '').trim().length >= SCHEMA_LIMITS.USER_COMPANY_MIN
+  );
+}
 
 export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [authReady, setAuthReady] = useState(false);
@@ -126,11 +196,15 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [readNotificationIds, setReadNotificationIds] = useState<Set<string>>(new Set());
   const [latestToast, setLatestToast] = useState<BroadcastNotification | null>(null);
   const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
+  const [invitedUsers, setInvitedUsers] = useState<InvitedUser[]>([]);
   const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
+  const [activeToolSession, setActiveToolSession] = useState<ActiveToolSession | null>(null);
 
   const seenNotifIdsRef = useRef<Set<string>>(new Set());
   const initialNotifLoadRef = useRef(true);
   const seededOnceRef = useRef(false);
+  const activeSessionRef = useRef<ActiveToolSession | null>(null);
+  const wentAwayRef = useRef(false);
 
   const isVerified = Boolean(user && user.emailVerified);
   const isAdmin = Boolean(
@@ -140,14 +214,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const isProfileComplete = useMemo(() => {
     if (isAdmin) return true;
     if (!userProfile) return false;
-    return (
-      Boolean(userProfile.profileCompleted) &&
-      userProfile.displayName.trim().length >= SCHEMA_LIMITS.USER_NAME_MIN &&
-      userProfile.employeeCode.trim().length >= SCHEMA_LIMITS.USER_EMPLOYEE_CODE_MIN &&
-      userProfile.phone.trim().length >= SCHEMA_LIMITS.USER_PHONE_MIN &&
-      userProfile.jobTitle.trim().length >= SCHEMA_LIMITS.USER_JOB_MIN &&
-      userProfile.company.trim().length >= SCHEMA_LIMITS.USER_COMPANY_MIN
-    );
+    return Boolean(userProfile.profileCompleted) && hasCompleteProfileFields(userProfile);
   }, [isAdmin, userProfile]);
 
   const isApproved = useMemo(() => {
@@ -158,6 +225,68 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         userProfile?.approvalStatus === 'approved'
     );
   }, [isAdmin, isVerified, isProfileComplete, userProfile]);
+
+  const persistSessionState = useCallback((session: ActiveToolSession | null) => {
+    activeSessionRef.current = session;
+    setActiveToolSession(session);
+    try {
+      if (session) {
+        localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+      } else {
+        localStorage.removeItem(SESSION_STORAGE_KEY);
+      }
+    } catch {
+      // Ignore storage failures in private frames
+    }
+  }, []);
+
+  const commitSessionDuration = useCallback(
+    async (session: ActiveToolSession, finalize: boolean) => {
+      if (!user || session.uid !== user.uid) return;
+      const totalElapsed = Math.max(
+        1,
+        Math.min(
+          SCHEMA_LIMITS.MAX_SESSION_SECONDS,
+          Math.round((Date.now() - session.startedAt) / 1000)
+        )
+      );
+      const delta = Math.max(0, totalElapsed - session.committedSeconds);
+
+      try {
+        await updateDoc(doc(db, 'activityLogs', session.logId), {
+          durationSeconds: totalElapsed,
+          sessionStatus: finalize ? 'completed' : 'active',
+          updatedAt: serverTimestamp(),
+        });
+
+        if (delta > 0) {
+          await updateDoc(doc(db, 'users', user.uid), {
+            totalDurationSeconds: increment(delta),
+            platformInfo: detectPlatformInfo().slice(0, 100),
+            lastActiveAt: serverTimestamp(),
+          });
+        }
+
+        if (!finalize && activeSessionRef.current?.logId === session.logId) {
+          persistSessionState({
+            ...session,
+            committedSeconds: totalElapsed,
+          });
+        }
+      } catch {
+        // Non-blocking telemetry update if user switched quickly or offline
+      }
+    },
+    [persistSessionState, user]
+  );
+
+  const finishActiveToolSession = useCallback(async () => {
+    const current = activeSessionRef.current;
+    if (!current) return;
+    wentAwayRef.current = false;
+    persistSessionState(null);
+    await commitSessionDuration(current, true);
+  }, [commitSessionDuration, persistSessionState]);
 
   // 1. Auth State Listener
   useEffect(() => {
@@ -171,13 +300,79 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         setNotifications([]);
         setReadNotificationIds(new Set());
         setAllUsers([]);
+        setInvitedUsers([]);
         setActivityLogs([]);
+        persistSessionState(null);
         initialNotifLoadRef.current = true;
         seenNotifIdsRef.current.clear();
       }
     });
     return () => unsub();
-  }, []);
+  }, [persistSessionState]);
+
+  // Recover unfinished session if user closed/reloaded tab after returning
+  useEffect(() => {
+    if (!authReady || !user || !isVerified || !isApproved) return;
+    try {
+      const raw = localStorage.getItem(SESSION_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as ActiveToolSession;
+      if (parsed && parsed.uid === user.uid && parsed.logId && parsed.startedAt) {
+        const ageSec = Math.round((Date.now() - parsed.startedAt) / 1000);
+        if (ageSec >= 2 && ageSec <= SCHEMA_LIMITS.MAX_SESSION_SECONDS) {
+          void commitSessionDuration(parsed, true);
+        }
+      }
+      localStorage.removeItem(SESSION_STORAGE_KEY);
+    } catch {
+      // Ignore corrupt storage
+    }
+  }, [authReady, user, isVerified, isApproved, commitSessionDuration]);
+
+  // Track external-tab return & embedded periodic checkpoints
+  useEffect(() => {
+    if (!activeToolSession) return;
+
+    if (activeToolSession.mode === 'launch') {
+      const handleLeave = () => {
+        if (document.visibilityState === 'hidden' || !document.hasFocus()) {
+          wentAwayRef.current = true;
+        }
+      };
+      const handleReturn = () => {
+        const current = activeSessionRef.current;
+        if (!current || current.mode !== 'launch') return;
+        const elapsed = Math.round((Date.now() - current.startedAt) / 1000);
+        if (wentAwayRef.current && elapsed >= 3 && document.visibilityState === 'visible') {
+          void finishActiveToolSession();
+        }
+      };
+
+      const handleVisibilityChange = () => {
+        if (document.visibilityState === 'hidden') handleLeave();
+        else handleReturn();
+      };
+
+      window.addEventListener('blur', handleLeave);
+      window.addEventListener('focus', handleReturn);
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+
+      return () => {
+        window.removeEventListener('blur', handleLeave);
+        window.removeEventListener('focus', handleReturn);
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+      };
+    }
+
+    const timer = window.setInterval(() => {
+      const current = activeSessionRef.current;
+      if (current && current.mode === 'embedded_launch') {
+        void commitSessionDuration(current, false);
+      }
+    }, 30000);
+
+    return () => window.clearInterval(timer);
+  }, [activeToolSession, commitSessionDuration, finishActiveToolSession]);
 
   // 2. Sync Own User Profile Document (/users/{uid})
   useEffect(() => {
@@ -196,26 +391,69 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       try {
         const snap = await getDoc(userDocRef);
         if (!snap.exists()) {
+          let invitedData: Partial<InvitedUser> | null = null;
+          if (!isAdminEmail && user.email) {
+            try {
+              const emailKey = sanitizeEmailKey(user.email);
+              const invitedSnap = await getDoc(doc(db, 'invitedUsers', emailKey));
+              if (invitedSnap.exists()) {
+                invitedData = invitedSnap.data() as Partial<InvitedUser>;
+              }
+            } catch {
+              // Ignore if no invited record exists
+            }
+          }
+
+          const displayName = (
+            invitedData?.displayName ||
+            user.displayName ||
+            (isAdminEmail ? OWNER_INFO.nameAr : user.email?.split('@')[0]) ||
+            'مستخدم'
+          ).slice(0, SCHEMA_LIMITS.USER_NAME_MAX);
+          const employeeCode = (
+            invitedData?.employeeCode ?? (isAdminEmail ? 'ADMIN-01' : '')
+          ).slice(0, SCHEMA_LIMITS.USER_EMPLOYEE_CODE_MAX);
+          const phone = (
+            invitedData?.phone ?? (isAdminEmail ? OWNER_INFO.phone : '')
+          ).slice(0, SCHEMA_LIMITS.USER_PHONE_MAX);
+          const jobTitle = (
+            invitedData?.jobTitle ?? (isAdminEmail ? OWNER_INFO.roleAr : '')
+          ).slice(0, SCHEMA_LIMITS.USER_JOB_MAX);
+          const company = (
+            invitedData?.company ?? (isAdminEmail ? OWNER_INFO.companyAr : '')
+          ).slice(0, SCHEMA_LIMITS.USER_COMPANY_MAX);
+
+          const complete = isAdminEmail
+            ? true
+            : hasCompleteProfileFields({
+                displayName,
+                employeeCode,
+                phone,
+                jobTitle,
+                company,
+              });
+
           const newProfile = {
             uid: user.uid,
             email: (user.email || '').slice(0, 150),
-            displayName: (
-              user.displayName ||
-              (isAdminEmail ? OWNER_INFO.nameAr : user.email?.split('@')[0]) ||
-              'مستخدم'
-            ).slice(0, SCHEMA_LIMITS.USER_NAME_MAX),
-            employeeCode: isAdminEmail ? 'ADMIN-01' : '',
-            phone: isAdminEmail ? OWNER_INFO.phone : '',
-            jobTitle: isAdminEmail ? OWNER_INFO.roleAr : '',
-            company: isAdminEmail ? OWNER_INFO.companyAr : '',
+            displayName,
+            employeeCode,
+            phone,
+            jobTitle,
+            company,
             photoURL: (user.photoURL || '').slice(0, 500),
-            role: isAdminEmail ? 'admin' : 'user',
-            approvalStatus: isAdminEmail ? 'approved' : 'pending',
-            profileCompleted: isAdminEmail,
+            role: isAdminEmail ? 'admin' : invitedData?.role === 'admin' ? 'admin' : 'user',
+            approvalStatus: isAdminEmail
+              ? 'approved'
+              : invitedData?.approvalStatus || 'pending',
+            profileCompleted: complete,
             notificationsEnabled:
               typeof Notification !== 'undefined' && Notification.permission === 'granted',
             platformInfo,
             totalLaunches: 0,
+            totalDurationSeconds: 0,
+            adminNotes: (invitedData?.adminNotes || '').slice(0, SCHEMA_LIMITS.ADMIN_NOTES_MAX),
+            customFields: sanitizeCustomFields(invitedData?.customFields),
             lastActiveAt: serverTimestamp(),
             createdAt: serverTimestamp(),
           };
@@ -233,10 +471,16 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
                 role: 'admin',
                 approvalStatus: 'approved',
                 profileCompleted: true,
-                employeeCode: existingData.employeeCode?.trim() ? existingData.employeeCode : 'ADMIN-01',
+                employeeCode: existingData.employeeCode?.trim()
+                  ? existingData.employeeCode
+                  : 'ADMIN-01',
                 phone: existingData.phone?.trim() ? existingData.phone : OWNER_INFO.phone,
-                jobTitle: existingData.jobTitle?.trim() ? existingData.jobTitle : OWNER_INFO.roleAr,
-                company: existingData.company?.trim() ? existingData.company : OWNER_INFO.companyAr,
+                jobTitle: existingData.jobTitle?.trim()
+                  ? existingData.jobTitle
+                  : OWNER_INFO.roleAr,
+                company: existingData.company?.trim()
+                  ? existingData.company
+                  : OWNER_INFO.companyAr,
                 platformInfo,
                 lastActiveAt: serverTimestamp(),
               });
@@ -252,12 +496,13 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             typeof existingData.employeeCode !== 'string'
           ) {
             const existingCode = (existingData.employeeCode || '').trim();
-            const hasCompleteFields =
-              (existingData.displayName || '').trim().length >= SCHEMA_LIMITS.USER_NAME_MIN &&
-              existingCode.length >= SCHEMA_LIMITS.USER_EMPLOYEE_CODE_MIN &&
-              (existingData.phone || '').trim().length >= SCHEMA_LIMITS.USER_PHONE_MIN &&
-              (existingData.jobTitle || '').trim().length >= SCHEMA_LIMITS.USER_JOB_MIN &&
-              (existingData.company || '').trim().length >= SCHEMA_LIMITS.USER_COMPANY_MIN;
+            const hasCompleteFields = hasCompleteProfileFields({
+              displayName: existingData.displayName,
+              employeeCode: existingCode,
+              phone: existingData.phone,
+              jobTitle: existingData.jobTitle,
+              company: existingData.company,
+            });
 
             await updateDoc(userDocRef, {
               employeeCode: existingCode,
@@ -300,6 +545,9 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             notificationsEnabled: Boolean(raw.notificationsEnabled),
             platformInfo: raw.platformInfo || platformInfo,
             totalLaunches: raw.totalLaunches ?? 0,
+            totalDurationSeconds: raw.totalDurationSeconds ?? 0,
+            adminNotes: raw.adminNotes || '',
+            customFields: raw.customFields || {},
             lastActiveAt: raw.lastActiveAt ?? null,
             createdAt: raw.createdAt ?? null,
           });
@@ -351,7 +599,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   // 4. Auto-seed Default Apps into Firestore on First Admin Login if Empty
   useEffect(() => {
-    if (!isAdmin || !adminAppsReady || appsLoading || firestoreApps.length > 0 || seededOnceRef.current) return;
+    if (!isAdmin || !adminAppsReady || appsLoading || firestoreApps.length > 0 || seededOnceRef.current)
+      return;
     seededOnceRef.current = true;
     void seedDefaultAppsInternal();
   }, [isAdmin, adminAppsReady, appsLoading, firestoreApps.length]);
@@ -459,10 +708,11 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return () => unsubRead();
   }, [authReady, user, isVerified, isApproved, userProfile]);
 
-  // 6. Admin-Only Listeners: All Users & Activity Logs
+  // 6. Admin-Only Listeners: All Users, Invited Users & Activity Logs
   useEffect(() => {
     if (!isAdmin) {
       setAllUsers([]);
+      setInvitedUsers([]);
       setActivityLogs([]);
       return;
     }
@@ -487,6 +737,9 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             notificationsEnabled: Boolean(raw.notificationsEnabled),
             platformInfo: raw.platformInfo || 'Web',
             totalLaunches: raw.totalLaunches ?? 0,
+            totalDurationSeconds: raw.totalDurationSeconds ?? 0,
+            adminNotes: raw.adminNotes || '',
+            customFields: raw.customFields || {},
             lastActiveAt: raw.lastActiveAt ?? null,
             createdAt: raw.createdAt ?? null,
           } satisfies UserProfile;
@@ -503,7 +756,27 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }
     );
 
-    const logsQuery = query(collection(db, 'activityLogs'), orderBy('createdAt', 'desc'), limit(80));
+    const unsubInvited = onSnapshot(
+      collection(db, 'invitedUsers'),
+      (snapshot) => {
+        const list = snapshot.docs.map((d) => d.data() as InvitedUser);
+        list.sort((a, b) => {
+          const ta = a.updatedAt?.toMillis?.() ?? 0;
+          const tb = b.updatedAt?.toMillis?.() ?? 0;
+          return tb - ta;
+        });
+        setInvitedUsers(list);
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.LIST, 'invitedUsers');
+      }
+    );
+
+    const logsQuery = query(
+      collection(db, 'activityLogs'),
+      orderBy('createdAt', 'desc'),
+      limit(500)
+    );
     const unsubLogs = onSnapshot(
       logsQuery,
       (snapshot) => {
@@ -517,6 +790,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     return () => {
       unsubUsers();
+      unsubInvited();
       unsubLogs();
     };
   }, [isAdmin]);
@@ -539,7 +813,11 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             'تسجيل الدخول بكلمة المرور غير مفعّل. يرجى تسجيل الدخول بحساب Google (Gmail).',
         };
       }
-      if (code === 'auth/invalid-credential' || code === 'auth/wrong-password' || code === 'auth/user-not-found') {
+      if (
+        code === 'auth/invalid-credential' ||
+        code === 'auth/wrong-password' ||
+        code === 'auth/user-not-found'
+      ) {
         return { ok: false, error: 'البريد الإلكتروني أو كلمة المرور غير صحيحة.' };
       }
       return { ok: false, error: 'تعذر تسجيل الدخول حالياً، يرجى استخدام حساب Google (Gmail).' };
@@ -550,7 +828,9 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     try {
       const cred = await createUserWithEmailAndPassword(auth, email.trim(), password);
       if (name.trim()) {
-        await updateProfile(cred.user, { displayName: name.trim().slice(0, SCHEMA_LIMITS.USER_NAME_MAX) });
+        await updateProfile(cred.user, {
+          displayName: name.trim().slice(0, SCHEMA_LIMITS.USER_NAME_MAX),
+        });
       }
       await sendEmailVerification(cred.user);
       return { ok: true, needsVerification: true };
@@ -559,12 +839,14 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (code === 'auth/operation-not-allowed' || code === 'auth/configuration-not-found') {
         return {
           ok: false,
-          error:
-            'التسجيل بكلمة المرور غير مفعّل. يرجى الدخول بحساب Google (Gmail).',
+          error: 'التسجيل بكلمة المرور غير مفعّل. يرجى الدخول بحساب Google (Gmail).',
         };
       }
       if (code === 'auth/email-already-in-use') {
-        return { ok: false, error: 'هذا البريد الإلكتروني مسجل بالفعل، يمكنك تسجيل الدخول مباشرة.' };
+        return {
+          ok: false,
+          error: 'هذا البريد الإلكتروني مسجل بالفعل، يمكنك تسجيل الدخول مباشرة.',
+        };
       }
       if (code === 'auth/weak-password') {
         return { ok: false, error: 'كلمة المرور يجب أن تكون 6 أحرف على الأقل.' };
@@ -591,24 +873,65 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const signOutUser = async () => {
+    await finishActiveToolSession();
     await signOut(auth);
   };
+
+  const logInstantAction = useCallback(
+    (
+      appId: string,
+      appTitle: string,
+      action: Extract<ActivityAction, 'copy_link' | 'profile_update' | 'notification_read'>,
+      details: string
+    ) => {
+      if (!user || !isVerified || !isApproved) return;
+      const logId = `act_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+      const logRef = doc(db, 'activityLogs', logId);
+      const deviceType = detectPlatformInfo().slice(0, 60);
+
+      void setDoc(logRef, {
+        userId: user.uid,
+        userEmail: (user.email || '').slice(0, 150),
+        userName: (
+          userProfile?.displayName ||
+          user.displayName ||
+          user.email ||
+          'User'
+        ).slice(0, SCHEMA_LIMITS.USER_NAME_MAX),
+        appId: sanitizeSlug(appId).slice(0, SCHEMA_LIMITS.APP_ID_MAX),
+        appTitle: appTitle.slice(0, 100),
+        deviceType,
+        action,
+        details: details.slice(0, SCHEMA_LIMITS.ACTIVITY_DETAILS_MAX),
+        durationSeconds: 0,
+        sessionStatus: 'instant',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }).catch((error) => {
+        handleFirestoreError(error, OperationType.CREATE, `activityLogs/${logId}`);
+      });
+    },
+    [isApproved, isVerified, user, userProfile?.displayName]
+  );
 
   const updateOwnProfile = async (input: ProfileUpdateInput) => {
     if (!user || !isVerified) return;
     const ref = doc(db, 'users', user.uid);
     const cleanName = (input.displayName.trim() || 'مستخدم').slice(0, SCHEMA_LIMITS.USER_NAME_MAX);
-    const cleanEmployeeCode = input.employeeCode.trim().slice(0, SCHEMA_LIMITS.USER_EMPLOYEE_CODE_MAX);
+    const cleanEmployeeCode = input.employeeCode
+      .trim()
+      .slice(0, SCHEMA_LIMITS.USER_EMPLOYEE_CODE_MAX);
     const cleanPhone = input.phone.trim().slice(0, SCHEMA_LIMITS.USER_PHONE_MAX);
     const cleanJob = input.jobTitle.trim().slice(0, SCHEMA_LIMITS.USER_JOB_MAX);
     const cleanCompany = input.company.trim().slice(0, SCHEMA_LIMITS.USER_COMPANY_MAX);
 
-    const complete =
-      cleanName.length >= SCHEMA_LIMITS.USER_NAME_MIN &&
-      cleanEmployeeCode.length >= SCHEMA_LIMITS.USER_EMPLOYEE_CODE_MIN &&
-      cleanPhone.length >= SCHEMA_LIMITS.USER_PHONE_MIN &&
-      cleanJob.length >= SCHEMA_LIMITS.USER_JOB_MIN &&
-      cleanCompany.length >= SCHEMA_LIMITS.USER_COMPANY_MIN;
+    const complete = hasCompleteProfileFields({
+      displayName: cleanName,
+      employeeCode: cleanEmployeeCode,
+      phone: cleanPhone,
+      jobTitle: cleanJob,
+      company: cleanCompany,
+    });
 
     try {
       await updateDoc(ref, {
@@ -625,6 +948,14 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         platformInfo: detectPlatformInfo().slice(0, 100),
         lastActiveAt: serverTimestamp(),
       });
+      if (isApproved) {
+        logInstantAction(
+          'platform-profile',
+          'إدارة الحساب الشخصي',
+          'profile_update',
+          'تحديث البيانات الوظيفية والتنبيهات'
+        );
+      }
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`);
     }
@@ -636,17 +967,21 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     try {
       const snap = await getDoc(ref);
       const raw = (snap.exists() ? snap.data() : {}) as Partial<UserProfile>;
-      const cleanName = (raw.displayName || 'مستخدم').trim().slice(0, SCHEMA_LIMITS.USER_NAME_MAX) || 'مستخدم';
-      const cleanEmployeeCode = (raw.employeeCode || '').trim().slice(0, SCHEMA_LIMITS.USER_EMPLOYEE_CODE_MAX);
+      const cleanName =
+        (raw.displayName || 'مستخدم').trim().slice(0, SCHEMA_LIMITS.USER_NAME_MAX) || 'مستخدم';
+      const cleanEmployeeCode = (raw.employeeCode || '')
+        .trim()
+        .slice(0, SCHEMA_LIMITS.USER_EMPLOYEE_CODE_MAX);
       const cleanPhone = (raw.phone || '').trim().slice(0, SCHEMA_LIMITS.USER_PHONE_MAX);
       const cleanJob = (raw.jobTitle || '').trim().slice(0, SCHEMA_LIMITS.USER_JOB_MAX);
       const cleanCompany = (raw.company || '').trim().slice(0, SCHEMA_LIMITS.USER_COMPANY_MAX);
-      const hasCompleteFields =
-        cleanName.length >= SCHEMA_LIMITS.USER_NAME_MIN &&
-        cleanEmployeeCode.length >= SCHEMA_LIMITS.USER_EMPLOYEE_CODE_MIN &&
-        cleanPhone.length >= SCHEMA_LIMITS.USER_PHONE_MIN &&
-        cleanJob.length >= SCHEMA_LIMITS.USER_JOB_MIN &&
-        cleanCompany.length >= SCHEMA_LIMITS.USER_COMPANY_MIN;
+      const hasCompleteFields = hasCompleteProfileFields({
+        displayName: cleanName,
+        employeeCode: cleanEmployeeCode,
+        phone: cleanPhone,
+        jobTitle: cleanJob,
+        company: cleanCompany,
+      });
 
       await updateDoc(ref, {
         displayName: cleanName,
@@ -667,21 +1002,183 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
-  const trackAppLaunch = (appItem: AppItem) => {
+  const saveUserByAdmin = async (targetUid: string, input: AdminUserEditInput) => {
+    if (!isAdmin) return;
+    const ref = doc(db, 'users', targetUid);
+    try {
+      const snap = await getDoc(ref);
+      const raw = (snap.exists() ? snap.data() : {}) as Partial<UserProfile>;
+      const isPrimaryAdminAccount =
+        (raw.email || '').toLowerCase() === ADMIN_EMAIL.toLowerCase();
+
+      const cleanName =
+        input.displayName.trim().slice(0, SCHEMA_LIMITS.USER_NAME_MAX) || 'مستخدم';
+      const cleanCode = input.employeeCode
+        .trim()
+        .slice(0, SCHEMA_LIMITS.USER_EMPLOYEE_CODE_MAX);
+      const cleanPhone = input.phone.trim().slice(0, SCHEMA_LIMITS.USER_PHONE_MAX);
+      const cleanJob = input.jobTitle.trim().slice(0, SCHEMA_LIMITS.USER_JOB_MAX);
+      const cleanCompany = input.company.trim().slice(0, SCHEMA_LIMITS.USER_COMPANY_MAX);
+      const cleanNotes = input.adminNotes.trim().slice(0, SCHEMA_LIMITS.ADMIN_NOTES_MAX);
+      const cleanCustomFields = sanitizeCustomFields(input.customFields);
+
+      const complete = isPrimaryAdminAccount
+        ? true
+        : hasCompleteProfileFields({
+            displayName: cleanName,
+            employeeCode: cleanCode,
+            phone: cleanPhone,
+            jobTitle: cleanJob,
+            company: cleanCompany,
+          });
+
+      await updateDoc(ref, {
+        displayName: cleanName,
+        employeeCode: cleanCode,
+        phone: cleanPhone,
+        jobTitle: cleanJob,
+        company: cleanCompany,
+        photoURL: (raw.photoURL || '').slice(0, 500),
+        role: isPrimaryAdminAccount ? 'admin' : input.role,
+        approvalStatus: isPrimaryAdminAccount ? 'approved' : input.approvalStatus,
+        profileCompleted: complete,
+        notificationsEnabled: Boolean(raw.notificationsEnabled),
+        platformInfo: (raw.platformInfo || 'Web').slice(0, 100),
+        adminNotes: cleanNotes,
+        customFields: cleanCustomFields,
+        lastActiveAt: serverTimestamp(),
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `users/${targetUid}`);
+    }
+  };
+
+  const addOrUpdateInvitedUser = async (
+    input: InvitedUserInput
+  ): Promise<'updated_existing' | 'saved_invited'> => {
+    if (!user || !isAdmin) return 'saved_invited';
+    const cleanEmail = input.email.trim().toLowerCase().slice(0, 150);
+    const existingRegistered = allUsers.find(
+      (u) => u.email.toLowerCase() === cleanEmail
+    );
+
+    if (existingRegistered) {
+      await saveUserByAdmin(existingRegistered.uid, input);
+      return 'updated_existing';
+    }
+
+    const emailKey = sanitizeEmailKey(cleanEmail);
+    const ref = doc(db, 'invitedUsers', emailKey);
+    const cleanName =
+      input.displayName.trim().slice(0, SCHEMA_LIMITS.USER_NAME_MAX) || 'عضو جديد';
+    const cleanCode = input.employeeCode
+      .trim()
+      .slice(0, SCHEMA_LIMITS.USER_EMPLOYEE_CODE_MAX);
+    const cleanPhone = input.phone.trim().slice(0, SCHEMA_LIMITS.USER_PHONE_MAX);
+    const cleanJob = input.jobTitle.trim().slice(0, SCHEMA_LIMITS.USER_JOB_MAX);
+    const cleanCompany = input.company.trim().slice(0, SCHEMA_LIMITS.USER_COMPANY_MAX);
+    const cleanNotes = input.adminNotes.trim().slice(0, SCHEMA_LIMITS.ADMIN_NOTES_MAX);
+    const cleanCustomFields = sanitizeCustomFields(input.customFields);
+
+    try {
+      const existingSnap = await getDoc(ref);
+      if (existingSnap.exists()) {
+        await updateDoc(ref, {
+          email: cleanEmail,
+          displayName: cleanName,
+          employeeCode: cleanCode,
+          phone: cleanPhone,
+          jobTitle: cleanJob,
+          company: cleanCompany,
+          role: input.role,
+          approvalStatus: input.approvalStatus,
+          adminNotes: cleanNotes,
+          customFields: cleanCustomFields,
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        await setDoc(ref, {
+          id: emailKey,
+          email: cleanEmail,
+          displayName: cleanName,
+          employeeCode: cleanCode,
+          phone: cleanPhone,
+          jobTitle: cleanJob,
+          company: cleanCompany,
+          role: input.role,
+          approvalStatus: input.approvalStatus,
+          adminNotes: cleanNotes,
+          customFields: cleanCustomFields,
+          createdBy: user.uid,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
+      return 'saved_invited';
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `invitedUsers/${emailKey}`);
+    }
+  };
+
+  const removeInvitedUser = async (emailKey: string) => {
+    if (!isAdmin) return;
+    try {
+      await deleteDoc(doc(db, 'invitedUsers', emailKey));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `invitedUsers/${emailKey}`);
+    }
+  };
+
+  const trackAppLaunch = (
+    appItem: AppItem,
+    mode: 'launch' | 'embedded_launch' = 'launch'
+  ) => {
     if (!user || !isVerified || !isApproved) return;
+
+    if (activeSessionRef.current) {
+      void finishActiveToolSession();
+    }
+
     const logId = `log_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
     const logRef = doc(db, 'activityLogs', logId);
     const userRef = doc(db, 'users', user.uid);
     const deviceType = detectPlatformInfo().slice(0, 60);
 
+    const newSession: ActiveToolSession = {
+      logId,
+      uid: user.uid,
+      appId: appItem.id.slice(0, SCHEMA_LIMITS.APP_ID_MAX),
+      appTitle: appItem.title.slice(0, 100),
+      appTitleAr: appItem.titleAr.slice(0, 120),
+      startedAt: Date.now(),
+      mode,
+      committedSeconds: 0,
+    };
+
+    wentAwayRef.current = false;
+    persistSessionState(newSession);
+
     void setDoc(logRef, {
       userId: user.uid,
       userEmail: (user.email || '').slice(0, 150),
-      userName: (userProfile?.displayName || user.displayName || user.email || 'User').slice(0, SCHEMA_LIMITS.USER_NAME_MAX),
+      userName: (
+        userProfile?.displayName ||
+        user.displayName ||
+        user.email ||
+        'User'
+      ).slice(0, SCHEMA_LIMITS.USER_NAME_MAX),
       appId: appItem.id.slice(0, SCHEMA_LIMITS.APP_ID_MAX),
       appTitle: appItem.title.slice(0, 100),
       deviceType,
+      action: mode,
+      details:
+        mode === 'embedded_launch'
+          ? `تشغيل ${appItem.titleAr} داخل المنصة`
+          : `فتح ${appItem.titleAr} في تبويب جديد`,
+      durationSeconds: 0,
+      sessionStatus: 'active',
       createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
     }).catch((error) => {
       handleFirestoreError(error, OperationType.CREATE, `activityLogs/${logId}`);
     });
@@ -704,8 +1201,21 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         notificationId,
         readAt: serverTimestamp(),
       });
+      const notif = notifications.find((n) => n.id === notificationId);
+      if (notif) {
+        logInstantAction(
+          'platform-notifications',
+          notif.title.slice(0, 100),
+          'notification_read',
+          `تأكيد قراءة التوجيه: ${notif.title}`
+        );
+      }
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, `users/${user.uid}/readNotifications/${notificationId}`);
+      handleFirestoreError(
+        error,
+        OperationType.CREATE,
+        `users/${user.uid}/readNotifications/${notificationId}`
+      );
     }
   };
 
@@ -732,7 +1242,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       category: input.category,
       iconType: input.iconType,
       iconName: (input.iconName.trim() || 'Layers').slice(0, SCHEMA_LIMITS.ICON_NAME_MAX),
-      iconUrl: input.iconType === 'image' ? input.iconUrl.trim().slice(0, SCHEMA_LIMITS.ICON_URL_MAX) : '',
+      iconUrl:
+        input.iconType === 'image' ? input.iconUrl.trim().slice(0, SCHEMA_LIMITS.ICON_URL_MAX) : '',
       accentColor: input.accentColor,
       order: Math.max(0, Math.min(10000, Math.floor(Number(input.order) || 1))),
       isActive: Boolean(input.isActive),
@@ -765,7 +1276,11 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         });
       }
     } catch (error) {
-      handleFirestoreError(error, existing ? OperationType.UPDATE : OperationType.CREATE, `apps/${appId}`);
+      handleFirestoreError(
+        error,
+        existing ? OperationType.UPDATE : OperationType.CREATE,
+        `apps/${appId}`
+      );
     }
   };
 
@@ -859,7 +1374,9 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     latestToast,
     dismissLatestToast: () => setLatestToast(null),
     allUsers,
+    invitedUsers,
     activityLogs,
+    activeToolSession,
     signInWithGoogle,
     signInWithEmail,
     registerWithEmail,
@@ -868,7 +1385,12 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     signOutUser,
     updateOwnProfile,
     updateUserApproval,
+    saveUserByAdmin,
+    addOrUpdateInvitedUser,
+    removeInvitedUser,
     trackAppLaunch,
+    finishActiveToolSession,
+    logInstantAction,
     markNotificationRead,
     markAllNotificationsRead,
     saveApp,

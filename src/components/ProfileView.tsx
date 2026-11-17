@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   CheckCircle2,
+  Layers,
   Laptop,
   LogOut,
   Moon,
@@ -12,7 +13,7 @@ import {
 import { usePlatform } from '../context/PlatformContext';
 import { OWNER_INFO } from '../data/defaultApps';
 import { SCHEMA_LIMITS } from '../types/platform';
-import { detectPlatformInfo, requestNotificationPermission } from '../utils/device';
+import { detectPlatformInfo, formatDurationAr, requestNotificationPermission } from '../utils/device';
 import { PWAInstallButton } from './PWAInstallButton';
 
 interface ProfileViewProps {
@@ -168,8 +169,39 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               {userProfile?.totalLaunches ?? 0}
             </p>
           </div>
+          <div className="border-r border-zinc-200 dark:border-zinc-800 pr-6">
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">وقت الاستخدام</p>
+            <p className="text-xl font-bold font-mono-nums text-zinc-900 dark:text-white">
+              {formatDurationAr(userProfile?.totalDurationSeconds)}
+            </p>
+          </div>
         </div>
       </div>
+
+      {/* Admin-assigned custom fields (read-only for member; adminNotes remain admin-private) */}
+      {userProfile?.customFields && Object.keys(userProfile.customFields).length > 0 && (
+        <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 space-y-4">
+          <div className="flex items-center gap-2 border-b border-zinc-100 dark:border-zinc-800 pb-3">
+            <Layers className="h-4 w-4 text-red-600 dark:text-red-400" />
+            <h3 className="text-sm font-bold text-zinc-900 dark:text-white">
+              بيانات إضافية مسجلة من إدارة العمليات
+            </h3>
+          </div>
+          <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
+            {Object.entries(userProfile.customFields).map(([fieldKey, fieldValue]) => (
+              <div
+                key={fieldKey}
+                className="flex items-center justify-between gap-3 border-b border-zinc-100 dark:border-zinc-800/70 pb-2 text-xs"
+              >
+                <dt className="font-semibold text-zinc-500 dark:text-zinc-400">{fieldKey}</dt>
+                <dd className="font-bold text-zinc-900 dark:text-white text-left">
+                  {fieldValue || '—'}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      )}
 
       {/* Edit Profile Form */}
       <form

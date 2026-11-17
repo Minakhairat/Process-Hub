@@ -1,3 +1,5 @@
+import { SCHEMA_LIMITS } from '../types/platform';
+
 export function detectPlatformInfo(): string {
   if (typeof navigator === 'undefined') return 'Web Browser';
 
@@ -48,8 +50,8 @@ export async function dispatchDeviceNotification(title: string, body: string, ur
       if (reg) {
         await reg.showNotification(title, {
           body,
-          icon: './pwa-192x192.png',
-          badge: './pwa-192x192.png',
+          icon: './fresh-ops-192.png',
+          badge: './fresh-ops-192.png',
           data: { url },
         });
         return;
@@ -57,7 +59,7 @@ export async function dispatchDeviceNotification(title: string, body: string, ur
     }
     new Notification(title, {
       body,
-      icon: './pwa-192x192.png',
+      icon: './fresh-ops-192.png',
     });
   } catch {
     // Silent fallback when OS notification channel is unavailable inside embedded frames
@@ -72,4 +74,38 @@ export function sanitizeSlug(input: string): string {
     .replace(/^-+|-+$/g, '')
     .slice(0, 48);
   return cleaned || `app-${Date.now().toString(36)}`;
+}
+
+export function sanitizeEmailKey(email: string): string {
+  return email.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+}
+
+export function sanitizeCustomFields(raw?: Record<string, string>): Record<string, string> {
+  if (!raw) return {};
+  const result: Record<string, string> = {};
+  let count = 0;
+  for (const [key, value] of Object.entries(raw)) {
+    if (count >= SCHEMA_LIMITS.CUSTOM_FIELDS_MAX) break;
+    const cleanKey = key.trim().slice(0, SCHEMA_LIMITS.CUSTOM_KEY_MAX);
+    const cleanVal = String(value ?? '').trim().slice(0, SCHEMA_LIMITS.CUSTOM_VALUE_MAX);
+    if (!cleanKey) continue;
+    result[cleanKey] = cleanVal;
+    count += 1;
+  }
+  return result;
+}
+
+export function formatDurationAr(totalSeconds?: number): string {
+  const sec = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+  if (sec === 0) return '0 ث';
+  const hours = Math.floor(sec / 3600);
+  const minutes = Math.floor((sec % 3600) / 60);
+  const remSeconds = sec % 60;
+  if (hours > 0) {
+    return minutes > 0 ? `${hours} س ${minutes} د` : `${hours} س`;
+  }
+  if (minutes > 0) {
+    return remSeconds > 0 ? `${minutes} د ${remSeconds} ث` : `${minutes} د`;
+  }
+  return `${remSeconds} ث`;
 }

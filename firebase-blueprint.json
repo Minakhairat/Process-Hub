@@ -187,6 +187,19 @@
           "type": "integer",
           "description": "Count of tool launches recorded by this user."
         },
+        "totalDurationSeconds": {
+          "type": "integer",
+          "description": "Cumulative seconds spent using platform tools."
+        },
+        "adminNotes": {
+          "type": "string",
+          "maxLength": 1000,
+          "description": "Private administrative notes added by the operations manager."
+        },
+        "customFields": {
+          "type": "object",
+          "description": "Flexible custom key-value attributes assigned to the account by the administrator."
+        },
         "lastActiveAt": {
           "type": "string",
           "format": "date-time",
@@ -215,6 +228,89 @@
         "totalLaunches",
         "lastActiveAt",
         "createdAt"
+      ]
+    },
+    "InvitedUser": {
+      "title": "InvitedUser",
+      "description": "Pre-registered or admin-added factory member profile linked automatically upon first Google sign-in.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 160,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 150
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "employeeCode": {
+          "type": "string",
+          "maxLength": 30
+        },
+        "phone": {
+          "type": "string",
+          "maxLength": 30
+        },
+        "jobTitle": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "company": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "role": {
+          "type": "string",
+          "enum": ["user", "admin"]
+        },
+        "approvalStatus": {
+          "type": "string",
+          "enum": ["pending", "approved", "rejected"]
+        },
+        "adminNotes": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "customFields": {
+          "type": "object"
+        },
+        "createdBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "email",
+        "displayName",
+        "employeeCode",
+        "phone",
+        "jobTitle",
+        "company",
+        "role",
+        "approvalStatus",
+        "adminNotes",
+        "customFields",
+        "createdBy",
+        "createdAt",
+        "updatedAt"
       ]
     },
     "ReadNotificationReceipt": {
@@ -295,7 +391,7 @@
     },
     "ActivityLog": {
       "title": "ActivityLog",
-      "description": "Private audit trail recording when a signed-in user launches an application.",
+      "description": "Private audit trail recording tool sessions, duration spent, and user actions.",
       "type": "object",
       "properties": {
         "userId": {
@@ -330,7 +426,26 @@
           "minLength": 1,
           "maxLength": 60
         },
+        "action": {
+          "type": "string",
+          "enum": ["launch", "embedded_launch", "copy_link", "profile_update", "notification_read"]
+        },
+        "details": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "durationSeconds": {
+          "type": "integer"
+        },
+        "sessionStatus": {
+          "type": "string",
+          "enum": ["active", "completed", "instant"]
+        },
         "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
           "type": "string",
           "format": "date-time"
         }
@@ -355,6 +470,10 @@
       "schema": { "$ref": "#/entities/UserProfile" },
       "description": "Private user profile documents; each user accesses only their own record while the administrator has oversight."
     },
+    "/invitedUsers/{emailKey}": {
+      "schema": { "$ref": "#/entities/InvitedUser" },
+      "description": "Pre-registered factory user accounts created by the administrator before the employee's first sign-in."
+    },
     "/users/{userId}/readNotifications/{notificationId}": {
       "schema": { "$ref": "#/entities/ReadNotificationReceipt" },
       "description": "Subcollection tracking which broadcast notifications a user has acknowledged."
@@ -365,7 +484,7 @@
     },
     "/activityLogs/{logId}": {
       "schema": { "$ref": "#/entities/ActivityLog" },
-      "description": "App launch logs visible only to the record owner and the administrator."
+      "description": "App launch, time-spent, and audit action logs visible only to the record owner and the administrator."
     }
   }
 }

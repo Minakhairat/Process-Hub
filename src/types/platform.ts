@@ -6,6 +6,13 @@ export type AccentColor = 'red' | 'blue' | 'emerald' | 'amber' | 'indigo' | 'ros
 export type UserRole = 'user' | 'admin';
 export type ApprovalStatus = 'pending' | 'approved' | 'rejected';
 export type NotificationType = 'announcement' | 'new_app' | 'update' | 'urgent';
+export type ActivityAction =
+  | 'launch'
+  | 'embedded_launch'
+  | 'copy_link'
+  | 'profile_update'
+  | 'notification_read';
+export type SessionStatus = 'active' | 'completed' | 'instant';
 
 export const SCHEMA_LIMITS = {
   ID_REGEX: /^[a-zA-Z0-9_-]+$/,
@@ -27,6 +34,12 @@ export const SCHEMA_LIMITS = {
   USER_JOB_MAX: 100,
   USER_COMPANY_MIN: 2,
   USER_COMPANY_MAX: 100,
+  ADMIN_NOTES_MAX: 1000,
+  CUSTOM_FIELDS_MAX: 25,
+  CUSTOM_KEY_MAX: 60,
+  CUSTOM_VALUE_MAX: 200,
+  ACTIVITY_DETAILS_MAX: 300,
+  MAX_SESSION_SECONDS: 28800,
   NOTIF_TITLE_MAX: 120,
   NOTIF_BODY_MAX: 1000,
 } as const;
@@ -65,8 +78,28 @@ export interface UserProfile {
   notificationsEnabled: boolean;
   platformInfo: string;
   totalLaunches: number;
+  totalDurationSeconds?: number;
+  adminNotes?: string;
+  customFields?: Record<string, string>;
   lastActiveAt?: Timestamp | null;
   createdAt?: Timestamp | null;
+}
+
+export interface InvitedUser {
+  id: string;
+  email: string;
+  displayName: string;
+  employeeCode: string;
+  phone: string;
+  jobTitle: string;
+  company: string;
+  role: UserRole;
+  approvalStatus: ApprovalStatus;
+  adminNotes: string;
+  customFields: Record<string, string>;
+  createdBy: string;
+  createdAt?: Timestamp | null;
+  updatedAt?: Timestamp | null;
 }
 
 export interface BroadcastNotification {
@@ -89,7 +122,12 @@ export interface ActivityLog {
   appId: string;
   appTitle: string;
   deviceType: string;
+  action?: ActivityAction;
+  details?: string;
+  durationSeconds?: number;
+  sessionStatus?: SessionStatus;
   createdAt?: Timestamp | null;
+  updatedAt?: Timestamp | null;
 }
 
 export const CATEGORY_LABELS: Record<AppCategory, string> = {
@@ -112,4 +150,12 @@ export const APPROVAL_STATUS_LABELS: Record<ApprovalStatus, string> = {
   pending: 'بانتظار الموافقة',
   approved: 'مقبول ومفعل',
   rejected: 'مرفوض',
+};
+
+export const ACTIVITY_ACTION_LABELS: Record<ActivityAction, string> = {
+  launch: 'تشغيل الأداة (نافذة خارجية)',
+  embedded_launch: 'تشغيل الأداة (داخل المنصة)',
+  copy_link: 'نسخ رابط الأداة',
+  profile_update: 'تحديث بيانات الحساب',
+  notification_read: 'قراءة توجيه إداري',
 };

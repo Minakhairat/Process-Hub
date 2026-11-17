@@ -1,20 +1,25 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   ArrowUpLeft,
   Check,
+  Clock,
   Copy,
   Factory,
   Layers,
   Mail,
   MessageCircle,
+  MonitorPlay,
   Phone,
   Search,
   ShieldCheck,
+  Square,
+  X,
 } from 'lucide-react';
 import { OWNER_INFO } from '../data/defaultApps';
 import heroFactoryImg from '../assets/images/hero_fresh_factory_1794650867727.jpg';
 import { usePlatform } from '../context/PlatformContext';
 import { CATEGORY_LABELS, type AppCategory, type AppItem } from '../types/platform';
+import { formatDurationAr } from '../utils/device';
 import { AppIcon } from './AppIcon';
 import { FreshLogo } from './FreshLogo';
 import { PWAInstallButton } from './PWAInstallButton';
@@ -33,11 +38,36 @@ const FILTER_OPTIONS: { value: 'all' | AppCategory; label: string }[] = [
 ];
 
 export const AppsCatalogView: React.FC<AppsCatalogViewProps> = ({ onOpenAuth }) => {
-  const { apps, appsLoading, isVerified, isAdmin, userProfile, trackAppLaunch } = usePlatform();
+  const {
+    apps,
+    appsLoading,
+    isVerified,
+    isAdmin,
+    userProfile,
+    activeToolSession,
+    trackAppLaunch,
+    finishActiveToolSession,
+    logInstantAction,
+  } = usePlatform();
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<'all' | AppCategory>('all');
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [heroImgError, setHeroImgError] = useState(false);
+  const [embeddedApp, setEmbeddedApp] = useState<AppItem | null>(null);
+  const [elapsedSec, setElapsedSec] = useState(0);
+
+  useEffect(() => {
+    if (!activeToolSession) {
+      setElapsedSec(0);
+      return;
+    }
+    const updateElapsed = () => {
+      setElapsedSec(Math.max(0, Math.round((Date.now() - activeToolSession.startedAt) / 1000)));
+    };
+    updateElapsed();
+    const id = window.setInterval(updateElapsed, 1000);
+    return () => window.clearInterval(id);
+  }, [activeToolSession]);
 
   const visibleApps = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -64,10 +94,21 @@ export const AppsCatalogView: React.FC<AppsCatalogViewProps> = ({ onOpenAuth }) 
     try {
       await navigator.clipboard.writeText(app.url);
       setCopiedId(app.id);
+      logInstantAction(app.id, app.title, 'copy_link', `نسخ رابط ${app.titleAr}`);
       setTimeout(() => setCopiedId((prev) => (prev === app.id ? null : prev)), 2000);
     } catch {
       // Clipboard blocked in restricted context
     }
+  };
+
+  const handleOpenEmbedded = (app: AppItem) => {
+    setEmbeddedApp(app);
+    trackAppLaunch(app, 'embedded_launch');
+  };
+
+  const handleCloseEmbedded = async () => {
+    setEmbeddedApp(null);
+    await finishActiveToolSession();
   };
 
   return (
@@ -173,10 +214,12 @@ export const AppsCatalogView: React.FC<AppsCatalogViewProps> = ({ onOpenAuth }) 
 
         <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
           <p className="text-xs text-zinc-500 dark:text-zinc-400">
-            {isVerified ? 'عمليات التشغيل المسجلة' : 'حالة الحساب'}
+            {isVerified ? 'عمليات التشغيل · الوقت' : 'حالة الحساب'}
           </p>
-          <p className="mt-1 text-lg sm:text-xl font-bold font-mono-nums text-zinc-900 dark:text-white truncate">
-            {isVerified ? userProfile?.totalLaunches ?? 0 : 'وصول سريع'}
+          <p className="mt-1 text-base sm:text-lg font-bold font-mono-nums text-zinc-900 dark:text-white truncate">
+            {isVerified
+              ? `${userProfile?.totalLaunches ?? 0} مرة · ${formatDurationAr(userProfile?.totalDurationSeconds)}`
+              : 'وصول سريع'}
           </p>
         </div>
 
@@ -187,6 +230,32 @@ export const AppsCatalogView: React.FC<AppsCatalogViewProps> = ({ onOpenAuth }) 
           </p>
         </div>
       </section>
+
+      {/* Active Session Status Bar (when working in an external or embedded tool) */}
+      {activeToolSession && !embeddedApp && (
+        <div className="rounded-2xl border border-emerald-200 dark:border-emerald-800/70 bg-emerald-50/70 dark:bg-emerald-950/25 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <span className="h-2.5 w-2.5 rounded-full bg-emerald-600 animate-pulse shrink-0" />
+            <div className="min-w-0">
+              <p className="text-xs font-bold text-emerald-900 dark:text-emerald-200 truncate">
+                جلسة عمل نشطة: {activeToolSession.appTitleAr || activeToolSession.appTitle}
+              </p>
+              <p className="text-[11px] text-emerald-700 dark:text-emerald-300 font-mono-nums">
+                مدة الجلسة الحالية: {formatDurationAr(elapsedSec)} · يتم تسجيل الوقت تلقائياً عند العودة أو الإنهاء
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => void finishActiveToolSession()}
+            className="min-h-[38px] inline-flex items-center gap-1.5 rounded-xl border border-emerald-300 dark:border-emerald-700 bg-white dark:bg-zinc-900 px-3.5 py-1.5 text-xs font-semibold text-emerald-800 dark:text-emerald-200 hover:bg-emerald-100 dark:hover:bg-emerald-950/60 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+          >
+            <Square className="h-3.5 w-3.5" />
+            <span>إنهاء وحفظ الوقت</span>
+          </button>
+        </div>
+      )}
 
       {/* Search & Category Filter Workspace */}
       <section id="apps-grid" className="space-y-5">
@@ -328,12 +397,23 @@ export const AppsCatalogView: React.FC<AppsCatalogViewProps> = ({ onOpenAuth }) 
                     href={app.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    onClick={() => trackAppLaunch(app)}
-                    className="flex-1 min-h-[44px] inline-flex items-center justify-center gap-2 rounded-xl bg-zinc-900 dark:bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-600 dark:hover:bg-red-500 transition-colors whitespace-nowrap"
+                    onClick={() => trackAppLaunch(app, 'launch')}
+                    className="flex-1 min-h-[44px] inline-flex items-center justify-center gap-2 rounded-xl bg-zinc-900 dark:bg-red-600 px-3.5 py-2 text-sm font-semibold text-white hover:bg-red-600 dark:hover:bg-red-500 transition-colors whitespace-nowrap"
                   >
                     <span>فتح الأداة</span>
                     <ArrowUpLeft className="h-4 w-4" />
                   </a>
+
+                  <button
+                    type="button"
+                    onClick={() => handleOpenEmbedded(app)}
+                    title="تشغيل الأداة داخل المنصة مع تتبع الوقت"
+                    aria-label={`تشغيل ${app.title} داخل المنصة`}
+                    className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center gap-1.5 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-stone-50 dark:bg-zinc-800 px-3 text-xs font-semibold text-zinc-700 dark:text-zinc-200 hover:bg-red-50 hover:text-red-700 hover:border-red-200 dark:hover:bg-zinc-700 transition-colors cursor-pointer shrink-0 whitespace-nowrap"
+                  >
+                    <MonitorPlay className="h-4 w-4" />
+                    <span className="hidden sm:inline">داخل المنصة</span>
+                  </button>
 
                   <button
                     type="button"
@@ -407,6 +487,79 @@ export const AppsCatalogView: React.FC<AppsCatalogViewProps> = ({ onOpenAuth }) 
           </div>
         </div>
       </section>
+
+      {/* Embedded Tool Workspace Modal */}
+      {embeddedApp && (
+        <div
+          className="fixed inset-0 z-50 bg-zinc-950/80 backdrop-blur-sm p-2 sm:p-4 flex items-center justify-center"
+          role="dialog"
+          aria-modal="true"
+          aria-label={embeddedApp.titleAr}
+        >
+          <div className="w-full h-full max-w-6xl max-h-[92vh] rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-hidden flex flex-col shadow-2xl">
+            <div className="px-4 py-3 border-b border-zinc-200 dark:border-zinc-800 bg-stone-50 dark:bg-zinc-950 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <AppIcon
+                  iconType={embeddedApp.iconType}
+                  iconName={embeddedApp.iconName}
+                  iconUrl={embeddedApp.iconUrl}
+                  accentColor={embeddedApp.accentColor}
+                  alt={embeddedApp.title}
+                  size="sm"
+                />
+                <div className="min-w-0">
+                  <h3 className="text-sm font-bold text-zinc-900 dark:text-white truncate">
+                    {embeddedApp.titleAr} ·{' '}
+                    <span className="font-latin text-xs text-zinc-500 dark:text-zinc-400">
+                      {embeddedApp.title}
+                    </span>
+                  </h3>
+                  <div className="flex items-center gap-2 text-[11px] text-emerald-700 dark:text-emerald-400 font-mono-nums">
+                    <Clock className="h-3.5 w-3.5" />
+                    <span>وقت الجلسة المباشر: {formatDurationAr(elapsedSec)}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <a
+                  href={embeddedApp.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="min-h-[38px] inline-flex items-center gap-1.5 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-1.5 text-xs font-semibold text-zinc-700 dark:text-zinc-200 hover:border-red-300 transition-colors whitespace-nowrap"
+                >
+                  <span>فتح في نافذة مستقلة</span>
+                  <ArrowUpLeft className="h-3.5 w-3.5" />
+                </a>
+
+                <button
+                  type="button"
+                  onClick={() => void handleCloseEmbedded()}
+                  className="min-h-[38px] inline-flex items-center gap-1.5 rounded-xl bg-red-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-red-700 transition-colors whitespace-nowrap cursor-pointer"
+                >
+                  <X className="h-3.5 w-3.5" />
+                  <span>إنهاء الجلسة وإغلاق</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="px-4 py-1.5 bg-zinc-100 dark:bg-zinc-900/90 border-b border-zinc-200 dark:border-zinc-800 text-[11px] text-zinc-500 dark:text-zinc-400 flex items-center justify-between gap-2">
+              <span>
+                إذا لم تظهر الأداة داخل الإطار بسبب إعدادات الأمان في الموقع الخارجي، اضغط على «فتح في نافذة مستقلة» وسيظل حساب الوقت مستمراً.
+              </span>
+            </div>
+
+            <div className="flex-1 bg-white dark:bg-zinc-950 relative">
+              <iframe
+                src={embeddedApp.url}
+                title={embeddedApp.titleAr}
+                className="w-full h-full border-0"
+                allow="clipboard-read; clipboard-write; fullscreen"
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

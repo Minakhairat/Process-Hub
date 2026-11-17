@@ -41,19 +41,19 @@ export const dirtyDozenPayloads = [
   },
   {
     id: 5,
-    name: 'Cross-User Profile Read',
+    name: 'Cross-User Profile & Invite Read',
     auth: { uid: 'user-1', token: { email: 'user1@gmail.com', email_verified: true } },
     operation: 'get',
-    path: '/users/user-2',
+    path: '/invitedUsers/user2_gmail_com',
     expected: 'PERMISSION_DENIED',
   },
   {
     id: 6,
-    name: 'Shadow Ghost Field Injection',
+    name: 'Shadow Ghost Field / AdminNotes Tampering',
     auth: { uid: 'user-1', token: { email: 'user1@gmail.com', email_verified: true } },
-    operation: 'create',
+    operation: 'update',
     path: '/users/user-1',
-    payload: { isSuperAdmin: true },
+    payload: { adminNotes: 'hacked', customFields: { clearance: 'vip' } },
     expected: 'PERMISSION_DENIED',
   },
   {
@@ -101,11 +101,11 @@ export const dirtyDozenPayloads = [
   },
   {
     id: 12,
-    name: 'Oversized String DoS',
+    name: 'Oversized String / Duration DoS',
     auth: { uid: 'user-1', token: { email: 'user1@gmail.com', email_verified: true } },
     operation: 'update',
-    path: '/users/user-1',
-    payload: { displayName: 'x'.repeat(50000) },
+    path: '/activityLogs/log-1',
+    payload: { durationSeconds: 99999999 },
     expected: 'PERMISSION_DENIED',
   },
 ];
@@ -119,6 +119,7 @@ export function verifyRulesStructure() {
     rules.includes('isApprovedUser()'),
     rules.includes('isValidAppItem(incoming())'),
     rules.includes('isValidUserProfile(incoming())'),
+    rules.includes('isValidInvitedUser(incoming())'),
     rules.includes('isValidBroadcastNotification(incoming())'),
     rules.includes('isValidActivityLog(incoming())'),
   ];
