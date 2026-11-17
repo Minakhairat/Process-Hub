@@ -123,6 +123,7 @@ export function verifyRulesStructure() {
     rules.includes('isValidBroadcastNotification(incoming())'),
     rules.includes('isValidBiometricDevice(incoming())'),
     rules.includes('isValidActivityLog(incoming())'),
+    rules.includes('isValidProductionMetric(incoming())'),
   ];
   return checks.every(Boolean);
 }

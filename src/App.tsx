@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Bell, Grid, Moon, Shield, Sun, User, X } from 'lucide-react';
+import { BarChart3, Bell, Grid, Moon, Shield, Sun, User, X } from 'lucide-react';
 import { AccessGateView } from './components/AccessGateView';
 import { AdminConsole } from './components/AdminConsole';
 import { AppsCatalogView } from './components/AppsCatalogView';
@@ -8,12 +8,13 @@ import { BiometricLockView } from './components/BiometricLockView';
 import { FreshLogo } from './components/FreshLogo';
 import { NotificationsView } from './components/NotificationsView';
 import { OfflineIndicator } from './components/OfflineIndicator';
+import { ProductionDashboardView } from './components/ProductionDashboardView';
 import { ProfileView } from './components/ProfileView';
 import { ToolWorkspaceModal } from './components/ToolWorkspaceModal';
 import { PlatformProvider, usePlatform } from './context/PlatformContext';
 import { OWNER_INFO } from './data/defaultApps';
 
-type ActiveSection = 'apps' | 'notifications' | 'profile' | 'admin';
+type ActiveSection = 'apps' | 'dashboard' | 'notifications' | 'profile' | 'admin';
 
 const PlatformShell: React.FC = () => {
   const {
@@ -94,6 +95,7 @@ const PlatformShell: React.FC = () => {
 
   const navItems: { id: ActiveSection; label: string; badge?: number; icon: React.ReactNode }[] = [
     { id: 'apps', label: 'التطبيقات', icon: <Grid className="h-5 w-5" /> },
+    { id: 'dashboard', label: 'لوحة الأداء', icon: <BarChart3 className="h-5 w-5" /> },
     { id: 'notifications', label: 'الإشعارات', badge: unreadCount, icon: <Bell className="h-5 w-5" /> },
     { id: 'profile', label: 'حسابي', icon: <User className="h-5 w-5" /> },
     ...(isAdmin
@@ -202,6 +204,7 @@ const PlatformShell: React.FC = () => {
       {/* Main Content Area */}
       <main className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 pt-6 sm:pt-8 pb-24 md:pb-12">
         {section === 'apps' && <AppsCatalogView onOpenAuth={() => setAuthModalOpen(true)} />}
+        {section === 'dashboard' && <ProductionDashboardView />}
         {section === 'notifications' && <NotificationsView onOpenAuth={() => setAuthModalOpen(true)} />}
         {section === 'profile' && (
           <ProfileView
@@ -241,7 +244,7 @@ const PlatformShell: React.FC = () => {
       <nav
         aria-label="التنقل السفلي"
         className={`md:hidden fixed bottom-0 left-0 right-0 z-40 h-16 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md border-t border-zinc-200 dark:border-zinc-800 grid ${
-          isAdmin ? 'grid-cols-4' : 'grid-cols-3'
+          isAdmin ? 'grid-cols-5' : 'grid-cols-4'
         } items-center`}
       >
         {navItems.map((item) => {

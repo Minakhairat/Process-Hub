@@ -15,6 +15,53 @@ export type ActivityAction =
   | 'biometric_unlock';
 export type SessionStatus = 'active' | 'completed' | 'instant';
 export type NotificationTargetMode = 'all' | 'targeted';
+export type ProductionShift = 'الوردية الصباحية' | 'الوردية المسائية' | 'الوردية الليلية';
+
+export interface ProductionLineOption {
+  id: string;
+  name: string;
+  shortName: string;
+  defaultTarget: number;
+  color: string;
+}
+
+export const PRODUCTION_LINE_CATALOG: readonly ProductionLineOption[] = [
+  {
+    id: 'desert-cooler-1',
+    name: 'خط المبرد الصحراوي 1',
+    shortName: 'مبرد صحراوي 1',
+    defaultTarget: 420,
+    color: '#DC2626',
+  },
+  {
+    id: 'desert-cooler-2',
+    name: 'خط المبرد الصحراوي 2',
+    shortName: 'مبرد صحراوي 2',
+    defaultTarget: 380,
+    color: '#EA580C',
+  },
+  {
+    id: 'microwave-1',
+    name: 'خط الميكروويف 1',
+    shortName: 'ميكروويف 1',
+    defaultTarget: 520,
+    color: '#2563EB',
+  },
+  {
+    id: 'microwave-2',
+    name: 'خط الميكروويف 2',
+    shortName: 'ميكروويف 2',
+    defaultTarget: 460,
+    color: '#0D9488',
+  },
+  {
+    id: 'sub-assembly',
+    name: 'خط التجميع الفرعي',
+    shortName: 'التجميع الفرعي',
+    defaultTarget: 650,
+    color: '#7C3AED',
+  },
+] as const;
 
 export const DEFAULT_PRODUCTION_LINES = [
   'خط المبرد الصحراوي',
@@ -34,6 +81,7 @@ export const DEFAULT_SHIFTS = [
 export const SCHEMA_LIMITS = {
   ID_REGEX: /^[a-zA-Z0-9_-]+$/,
   URL_REGEX: /^https?:\/\/.+/,
+  DATE_REGEX: /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/,
   APP_ID_MAX: 64,
   APP_TITLE_MAX: 100,
   APP_TITLE_AR_MAX: 120,
@@ -60,6 +108,12 @@ export const SCHEMA_LIMITS = {
   NOTIF_TITLE_MAX: 120,
   NOTIF_BODY_MAX: 1000,
   TARGET_ITEMS_MAX: 10,
+  METRIC_ID_MAX: 64,
+  METRIC_LINE_NAME_MAX: 100,
+  METRIC_NOTES_MAX: 300,
+  METRIC_UNITS_MAX: 100000,
+  METRIC_MINUTES_MAX: 1440,
+  METRIC_OPERATORS_MAX: 500,
 } as const;
 
 export interface AppItem {
@@ -198,3 +252,23 @@ export const ACTIVITY_ACTION_LABELS: Record<ActivityAction, string> = {
   notification_read: 'قراءة توجيه إداري',
   biometric_unlock: 'دخول بيومتري بالبصمة / الوجه',
 };
+
+export interface ProductionMetric {
+  id: string;
+  date: string;
+  lineId: string;
+  lineName: string;
+  shift: ProductionShift;
+  targetUnits: number;
+  actualUnits: number;
+  defectUnits: number;
+  downtimeMinutes: number;
+  plannedMinutes: number;
+  operatorsCount: number;
+  notes: string;
+  isActive: boolean;
+  createdBy: string;
+  createdByName: string;
+  createdAt?: Timestamp | null;
+  updatedAt?: Timestamp | null;
+}

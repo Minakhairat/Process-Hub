@@ -524,6 +524,120 @@
         "deviceType",
         "createdAt"
       ]
+    },
+    "ProductionMetric": {
+      "title": "ProductionMetric",
+      "description": "Daily production line performance metrics (target, actual, defects, downtime, OEE) recorded in Firestore.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Unique record identifier."
+        },
+        "date": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 10,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+          "description": "Production date in YYYY-MM-DD format."
+        },
+        "lineId": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Production line slug identifier."
+        },
+        "lineName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100,
+          "description": "Arabic display name of the production line."
+        },
+        "shift": {
+          "type": "string",
+          "enum": ["الوردية الصباحية", "الوردية المسائية", "الوردية الليلية"],
+          "description": "Production shift name."
+        },
+        "targetUnits": {
+          "type": "integer",
+          "description": "Planned daily target units."
+        },
+        "actualUnits": {
+          "type": "integer",
+          "description": "Actual units produced."
+        },
+        "defectUnits": {
+          "type": "integer",
+          "description": "Defective or rework units."
+        },
+        "downtimeMinutes": {
+          "type": "integer",
+          "description": "Unplanned downtime in minutes."
+        },
+        "plannedMinutes": {
+          "type": "integer",
+          "description": "Planned shift runtime in minutes."
+        },
+        "operatorsCount": {
+          "type": "integer",
+          "description": "Number of operators on the line."
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 300,
+          "description": "Operational notes or root cause remarks."
+        },
+        "isActive": {
+          "type": "boolean",
+          "description": "Whether the metric record is active and visible."
+        },
+        "createdBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "UID of the user who logged the record."
+        },
+        "createdByName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Display name of the user who logged the record."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of creation."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update."
+        }
+      },
+      "required": [
+        "id",
+        "date",
+        "lineId",
+        "lineName",
+        "shift",
+        "targetUnits",
+        "actualUnits",
+        "defectUnits",
+        "downtimeMinutes",
+        "plannedMinutes",
+        "operatorsCount",
+        "notes",
+        "isActive",
+        "createdBy",
+        "createdByName",
+        "createdAt",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -554,6 +668,10 @@
     "/activityLogs/{logId}": {
       "schema": { "$ref": "#/entities/ActivityLog" },
       "description": "App launch, time-spent, and audit action logs visible only to the record owner and the administrator."
+    },
+    "/productionMetrics/{metricId}": {
+      "schema": { "$ref": "#/entities/ProductionMetric" },
+      "description": "Daily production line performance statistics retrieved for the factory operations dashboard."
     }
   }
 }

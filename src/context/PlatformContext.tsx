@@ -29,6 +29,7 @@ import {
 import { ADMIN_EMAIL, DEFAULT_APPS, OWNER_INFO } from '../data/defaultApps';
 import { auth, db, googleProvider, handleFirestoreError, OperationType } from '../lib/firebase';
 import {
+  PRODUCTION_LINE_CATALOG,
   SCHEMA_LIMITS,
   type AccentColor,
   type ActivityAction,
@@ -43,6 +44,8 @@ import {
   type NotificationReadReceipt,
   type NotificationTargetMode,
   type NotificationType,
+  type ProductionMetric,
+  type ProductionShift,
   type UserProfile,
   type UserRole,
 } from '../types/platform';
@@ -117,6 +120,22 @@ export interface AdminUserEditInput {
 
 export interface InvitedUserInput extends AdminUserEditInput {
   email: string;
+}
+
+export interface ProductionMetricInput {
+  id?: string;
+  date: string;
+  lineId: string;
+  lineName: string;
+  shift: ProductionShift;
+  targetUnits: number;
+  actualUnits: number;
+  defectUnits: number;
+  downtimeMinutes: number;
+  plannedMinutes: number;
+  operatorsCount: number;
+  notes: string;
+  isActive?: boolean;
 }
 
 export interface ActiveToolSession {
@@ -203,6 +222,11 @@ interface PlatformContextValue {
   sendBroadcastNotification: (input: NotificationFormInput) => Promise<void>;
   toggleNotificationActive: (notification: BroadcastNotification) => Promise<void>;
   removeNotification: (notificationId: string) => Promise<void>;
+  productionMetrics: ProductionMetric[];
+  productionMetricsLoading: boolean;
+  saveProductionMetric: (input: ProductionMetricInput) => Promise<void>;
+  removeProductionMetric: (metricId: string) => Promise<void>;
+  seedSampleProductionMetrics: () => Promise<number>;
 }
 
 const SESSION_STORAGE_KEY = 'fresh_ops_active_session_v1';
@@ -240,6 +264,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
   const [invitedUsers, setInvitedUsers] = useState<InvitedUser[]>([]);
   const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
+  const [productionMetrics, setProductionMetrics] = useState<ProductionMetric[]>([]);
+  const [productionMetricsLoading, setProductionMetricsLoading] = useState(false);
   const [activeToolSession, setActiveToolSession] = useState<ActiveToolSession | null>(null);
   const [activeEmbeddedApp, setActiveEmbeddedApp] = useState<AppItem | null>(null);
   const [biometricSupported] = useState(() => isWebAuthnSupported());
@@ -370,6 +396,8 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         setAllUsers([]);
         setInvitedUsers([]);
         setActivityLogs([]);
+        setProductionMetrics([]);
+        setProductionMetricsLoading(false);
         persistSessionState(null);
         initialNotifLoadRef.current = true;
         seenNotifIdsRef.current.clear();
@@ -666,6 +694,41 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     );
 
     return () => unsubApps();
+  }, [authReady, user, isVerified, isApproved, isAdmin]);
+
+  // 3b. Production Line Performance Metrics Listener (Firestore: /productionMetrics)
+  useEffect(() => {
+    if (!authReady || !user || !isVerified || !isApproved) {
+      setProductionMetrics([]);
+      setProductionMetricsLoading(false);
+      return;
+    }
+
+    setProductionMetricsLoading(true);
+    const metricsCol = collection(db, 'productionMetrics');
+    const metricsQuery = isAdmin ? query(metricsCol) : query(metricsCol, where('isActive', '==', true));
+
+    const unsubMetrics = onSnapshot(
+      metricsQuery,
+      (snapshot) => {
+        const list = snapshot.docs.map((d) => d.data() as ProductionMetric);
+        list.sort((a, b) => {
+          const dateDiff = b.date.localeCompare(a.date);
+          if (dateDiff !== 0) return dateDiff;
+          const ta = a.updatedAt?.toMillis?.() ?? a.createdAt?.toMillis?.() ?? 0;
+          const tb = b.updatedAt?.toMillis?.() ?? b.createdAt?.toMillis?.() ?? 0;
+          return tb - ta;
+        });
+        setProductionMetrics(list);
+        setProductionMetricsLoading(false);
+      },
+      (error) => {
+        setProductionMetricsLoading(false);
+        handleFirestoreError(error, OperationType.LIST, 'productionMetrics');
+      }
+    );
+
+    return () => unsubMetrics();
   }, [authReady, user, isVerified, isApproved, isAdmin]);
 
   // 4. Auto-seed Default Apps into Firestore on First Admin Login if Empty
@@ -1647,6 +1710,195 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
+  const saveProductionMetric = async (input: ProductionMetricInput) => {
+    if (!user || !isVerified || !isApproved) return;
+
+    const cleanDate = SCHEMA_LIMITS.DATE_REGEX.test(input.date.trim())
+      ? input.date.trim()
+      : new Date().toISOString().slice(0, 10);
+    const cleanLineId = sanitizeSlug(input.lineId || 'desert-cooler-1').slice(
+      0,
+      SCHEMA_LIMITS.METRIC_ID_MAX
+    );
+    const cleanLineName = (input.lineName.trim() || 'خط المبرد الصحراوي 1').slice(
+      0,
+      SCHEMA_LIMITS.METRIC_LINE_NAME_MAX
+    );
+    const targetUnits = Math.max(
+      1,
+      Math.min(SCHEMA_LIMITS.METRIC_UNITS_MAX, Math.round(Number(input.targetUnits) || 1))
+    );
+    const actualUnits = Math.max(
+      0,
+      Math.min(SCHEMA_LIMITS.METRIC_UNITS_MAX, Math.round(Number(input.actualUnits) || 0))
+    );
+    const defectUnits = Math.max(
+      0,
+      Math.min(SCHEMA_LIMITS.METRIC_UNITS_MAX, Math.round(Number(input.defectUnits) || 0))
+    );
+    const plannedMinutes = Math.max(
+      1,
+      Math.min(SCHEMA_LIMITS.METRIC_MINUTES_MAX, Math.round(Number(input.plannedMinutes) || 480))
+    );
+    const downtimeMinutes = Math.max(
+      0,
+      Math.min(SCHEMA_LIMITS.METRIC_MINUTES_MAX, Math.round(Number(input.downtimeMinutes) || 0))
+    );
+    const operatorsCount = Math.max(
+      1,
+      Math.min(SCHEMA_LIMITS.METRIC_OPERATORS_MAX, Math.round(Number(input.operatorsCount) || 1))
+    );
+    const notes = (input.notes || '').trim().slice(0, SCHEMA_LIMITS.METRIC_NOTES_MAX);
+    const isActive = input.isActive !== undefined ? Boolean(input.isActive) : true;
+
+    const metricId = input.id
+      ? sanitizeSlug(input.id).slice(0, SCHEMA_LIMITS.METRIC_ID_MAX)
+      : `pm_${cleanDate.replace(/-/g, '')}_${cleanLineId.slice(0, 20)}_${Math.random()
+          .toString(36)
+          .slice(2, 7)}`;
+
+    const ref = doc(db, 'productionMetrics', metricId);
+    const existing = productionMetrics.find((m) => m.id === metricId);
+    const authorName = (
+      userProfile?.displayName ||
+      user.displayName ||
+      user.email ||
+      'مهندس عمليات'
+    ).slice(0, SCHEMA_LIMITS.USER_NAME_MAX);
+
+    try {
+      if (existing) {
+        await updateDoc(ref, {
+          date: cleanDate,
+          lineId: cleanLineId,
+          lineName: cleanLineName,
+          shift: input.shift,
+          targetUnits,
+          actualUnits,
+          defectUnits,
+          downtimeMinutes,
+          plannedMinutes,
+          operatorsCount,
+          notes,
+          isActive,
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        await setDoc(ref, {
+          id: metricId,
+          date: cleanDate,
+          lineId: cleanLineId,
+          lineName: cleanLineName,
+          shift: input.shift,
+          targetUnits,
+          actualUnits,
+          defectUnits,
+          downtimeMinutes,
+          plannedMinutes,
+          operatorsCount,
+          notes,
+          isActive,
+          createdBy: user.uid,
+          createdByName: authorName,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
+    } catch (error) {
+      handleFirestoreError(
+        error,
+        existing ? OperationType.UPDATE : OperationType.CREATE,
+        `productionMetrics/${metricId}`
+      );
+    }
+  };
+
+  const removeProductionMetric = async (metricId: string) => {
+    if (!isAdmin) return;
+    try {
+      await deleteDoc(doc(db, 'productionMetrics', metricId));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `productionMetrics/${metricId}`);
+    }
+  };
+
+  const seedSampleProductionMetrics = async (): Promise<number> => {
+    if (!user || !isAdmin) return 0;
+    const authorName = (
+      userProfile?.displayName ||
+      user.displayName ||
+      OWNER_INFO.nameAr
+    ).slice(0, SCHEMA_LIMITS.USER_NAME_MAX);
+
+    const shifts: ProductionShift[] = ['الوردية الصباحية', 'الوردية المسائية'];
+    let count = 0;
+
+    for (let daysAgo = 9; daysAgo >= 0; daysAgo--) {
+      const d = new Date();
+      d.setDate(d.getDate() - daysAgo);
+      const dateStr = d.toISOString().slice(0, 10);
+
+      for (const line of PRODUCTION_LINE_CATALOG) {
+        for (let sIdx = 0; sIdx < shifts.length; sIdx++) {
+          const shift = shifts[sIdx];
+          const shiftFactor = sIdx === 0 ? 1 : 0.88;
+          const targetUnits = Math.round(line.defaultTarget * shiftFactor);
+          const wave = Math.sin((daysAgo + 1) * 0.9 + sIdx + line.id.length) * 0.08;
+          const actualUnits = Math.max(
+            0,
+            Math.round(targetUnits * (0.94 + wave))
+          );
+          const defectUnits = Math.max(
+            1,
+            Math.round(actualUnits * (0.015 + Math.abs(wave) * 0.12))
+          );
+          const downtimeMinutes = Math.max(
+            5,
+            Math.round(18 + ((daysAgo * 7 + line.id.length * 5 + sIdx * 11) % 35))
+          );
+          const metricId = `pm_${dateStr.replace(/-/g, '')}_${line.id}_s${sIdx + 1}`;
+          const ref = doc(db, 'productionMetrics', metricId);
+
+          try {
+            const existingSnap = await getDoc(ref);
+            if (!existingSnap.exists()) {
+              await setDoc(ref, {
+                id: metricId,
+                date: dateStr,
+                lineId: line.id,
+                lineName: line.name,
+                shift,
+                targetUnits,
+                actualUnits,
+                defectUnits,
+                downtimeMinutes,
+                plannedMinutes: 480,
+                operatorsCount: line.id.includes('sub') ? 22 : 16,
+                notes:
+                  downtimeMinutes > 38
+                    ? 'تبديل خامات وضبط جودة بداية الوردية'
+                    : 'تشغيل مستقر ضمن زمن التاكت المستهدف',
+                isActive: true,
+                createdBy: user.uid,
+                createdByName: authorName,
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+              });
+              count += 1;
+            }
+          } catch (error) {
+            handleFirestoreError(
+              error,
+              OperationType.WRITE,
+              `productionMetrics/${metricId}`
+            );
+          }
+        }
+      }
+    }
+    return count;
+  };
+
   const appsFromFirestore = isApproved && firestoreApps.length > 0;
   const effectiveApps = useMemo(() => {
     if (!isApproved) return [];
@@ -1764,6 +2016,11 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     sendBroadcastNotification,
     toggleNotificationActive,
     removeNotification,
+    productionMetrics,
+    productionMetricsLoading,
+    saveProductionMetric,
+    removeProductionMetric,
+    seedSampleProductionMetrics,
   };
 
   return <PlatformContext.Provider value={value}>{children}</PlatformContext.Provider>;
