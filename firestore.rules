@@ -119,7 +119,7 @@ service cloud.firestore {
         'uid', 'email', 'displayName', 'employeeCode', 'phone', 'jobTitle', 'company',
         'photoURL', 'role', 'approvalStatus', 'profileCompleted',
         'notificationsEnabled', 'platformInfo', 'totalLaunches', 'totalDurationSeconds',
-        'adminNotes', 'customFields', 'lastActiveAt', 'createdAt'
+        'adminNotes', 'customFields', 'biometricEnabled', 'lastActiveAt', 'createdAt'
       ])
       && isValidId(data.uid)
       && data.uid.size() <= 128
@@ -148,6 +148,7 @@ service cloud.firestore {
       && (!('totalDurationSeconds' in data) || (data.totalDurationSeconds is int && data.totalDurationSeconds >= 0 && data.totalDurationSeconds <= 100000000))
       && (!('adminNotes' in data) || (data.adminNotes is string && data.adminNotes.size() <= 1000))
       && (!('customFields' in data) || (data.customFields is map && data.customFields.size() <= 25))
+      && (!('biometricEnabled' in data) || data.biometricEnabled is bool)
       && data.lastActiveAt is timestamp
       && data.createdAt is timestamp;
     }
@@ -187,6 +188,23 @@ service cloud.firestore {
       && data.readAt is timestamp;
     }
 
+    function isValidBiometricDevice(data) {
+      return data.keys().hasAll([
+        'id', 'credentialId', 'deviceName', 'platformInfo', 'enabled', 'createdAt', 'lastUsedAt'
+      ])
+      && data.keys().hasOnly([
+        'id', 'credentialId', 'deviceName', 'platformInfo', 'enabled', 'createdAt', 'lastUsedAt'
+      ])
+      && isValidId(data.id)
+      && data.id.size() >= 3 && data.id.size() <= 128
+      && data.credentialId is string && data.credentialId.size() >= 8 && data.credentialId.size() <= 512
+      && data.deviceName is string && data.deviceName.size() >= 2 && data.deviceName.size() <= 100
+      && data.platformInfo is string && data.platformInfo.size() >= 2 && data.platformInfo.size() <= 100
+      && data.enabled is bool
+      && data.createdAt is timestamp
+      && data.lastUsedAt is timestamp;
+    }
+
     function isValidBroadcastNotification(data) {
       return data.keys().hasAll([
         'id', 'title', 'body', 'type', 'targetAppUrl',
@@ -194,7 +212,8 @@ service cloud.firestore {
       ])
       && data.keys().hasOnly([
         'id', 'title', 'body', 'type', 'targetAppUrl',
-        'targetAppTitle', 'senderName', 'isActive', 'createdAt'
+        'targetAppTitle', 'senderName', 'targetMode', 'targetLines', 'targetShifts',
+        'isActive', 'createdAt'
       ])
       && isValidId(data.id)
       && data.id.size() >= 2 && data.id.size() <= 64
@@ -204,6 +223,9 @@ service cloud.firestore {
       && data.targetAppUrl is string && data.targetAppUrl.size() <= 500
       && data.targetAppTitle is string && data.targetAppTitle.size() <= 100
       && data.senderName is string && data.senderName.size() >= 2 && data.senderName.size() <= 100
+      && (!('targetMode' in data) || data.targetMode in ['all', 'targeted'])
+      && (!('targetLines' in data) || (data.targetLines is list && data.targetLines.size() <= 10 && (data.targetLines.size() == 0 || (data.targetLines[0] is string && data.targetLines[0].size() <= 100))))
+      && (!('targetShifts' in data) || (data.targetShifts is list && data.targetShifts.size() <= 10 && (data.targetShifts.size() == 0 || (data.targetShifts[0] is string && data.targetShifts[0].size() <= 100))))
       && data.isActive is bool
       && data.createdAt is timestamp;
     }
@@ -226,7 +248,7 @@ service cloud.firestore {
       && data.appId.size() <= 64
       && data.appTitle is string && data.appTitle.size() >= 1 && data.appTitle.size() <= 100
       && data.deviceType is string && data.deviceType.size() >= 1 && data.deviceType.size() <= 60
-      && (!('action' in data) || data.action in ['launch', 'embedded_launch', 'copy_link', 'profile_update', 'notification_read'])
+      && (!('action' in data) || data.action in ['launch', 'embedded_launch', 'copy_link', 'profile_update', 'notification_read', 'biometric_unlock'])
       && (!('details' in data) || (data.details is string && data.details.size() <= 300))
       && (!('durationSeconds' in data) || (data.durationSeconds is int && data.durationSeconds >= 0 && data.durationSeconds <= 28800))
       && (!('sessionStatus' in data) || data.sessionStatus in ['active', 'completed', 'instant'])
@@ -313,7 +335,7 @@ service cloud.firestore {
             'displayName', 'employeeCode', 'phone', 'jobTitle', 'company', 'photoURL',
             'role', 'approvalStatus', 'profileCompleted', 'notificationsEnabled',
             'platformInfo', 'totalLaunches', 'totalDurationSeconds',
-            'adminNotes', 'customFields', 'lastActiveAt'
+            'adminNotes', 'customFields', 'biometricEnabled', 'lastActiveAt'
           ]))
           ||
           // Tier 2: Owner can update their own standard profile OR increment usage stats
@@ -327,7 +349,7 @@ service cloud.firestore {
             && (
               (incoming().diff(existing()).affectedKeys().hasOnly([
                 'displayName', 'employeeCode', 'phone', 'jobTitle', 'company', 'photoURL',
-                'approvalStatus', 'profileCompleted', 'notificationsEnabled',
+                'approvalStatus', 'profileCompleted', 'notificationsEnabled', 'biometricEnabled',
                 'platformInfo', 'lastActiveAt'
               ]))
               ||
@@ -367,6 +389,46 @@ service cloud.firestore {
         allow update: if false;
         allow delete: if isValidId(userId) && userId.size() <= 128 && isValidId(notificationId) && notificationId.size() <= 64 && (isOwner(userId) || isAdmin());
       }
+
+      // Master Gate Subcollection: Optional Biometric Device Passkeys
+      match /biometricDevices/{deviceId} {
+        allow get: if isValidId(userId) && userId.size() <= 128 && isValidId(deviceId) && deviceId.size() <= 128
+          && (isOwner(userId) || isAdmin())
+          && exists(/databases/$(database)/documents/users/$(userId));
+
+        allow list: if isValidId(userId) && userId.size() <= 128
+          && (isOwner(userId) || isBootstrappedAdmin());
+
+        allow create: if isValidId(userId) && userId.size() <= 128 && isValidId(deviceId) && deviceId.size() <= 128
+          && isOwner(userId)
+          && isApprovedUser()
+          && exists(/databases/$(database)/documents/users/$(userId))
+          && isValidBiometricDevice(incoming())
+          && incoming().id == deviceId
+          && incoming().createdAt == request.time
+          && incoming().lastUsedAt == request.time;
+
+        allow update: if isValidId(userId) && userId.size() <= 128 && isValidId(deviceId) && deviceId.size() <= 128
+          && isOwner(userId)
+          && isApprovedUser()
+          && exists(/databases/$(database)/documents/users/$(userId))
+          && isValidBiometricDevice(incoming())
+          && incoming().id == existing().id
+          && incoming().credentialId == existing().credentialId
+          && incoming().createdAt == existing().createdAt
+          && incoming().lastUsedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'deviceName', 'platformInfo', 'enabled', 'lastUsedAt'
+          ]);
+
+        allow delete: if isValidId(userId) && userId.size() <= 128 && isValidId(deviceId) && deviceId.size() <= 128
+          && (isOwner(userId) || isAdmin());
+      }
+    }
+
+    // Collection-group list access for Admin read-rate tracking across all production lines
+    match /{path=**}/readNotifications/{notificationId} {
+      allow list: if isBootstrappedAdmin();
     }
 
     // 2b. Pre-registered / Invited Users (/invitedUsers/{emailKey})
@@ -421,7 +483,8 @@ service cloud.firestore {
         && incoming().id == existing().id
         && incoming().createdAt == existing().createdAt
         && incoming().diff(existing()).affectedKeys().hasOnly([
-          'title', 'body', 'type', 'targetAppUrl', 'targetAppTitle', 'isActive'
+          'title', 'body', 'type', 'targetAppUrl', 'targetAppTitle',
+          'targetMode', 'targetLines', 'targetShifts', 'isActive'
         ]);
 
       allow delete: if isAdmin() && isValidId(notificationId) && notificationId.size() <= 64;

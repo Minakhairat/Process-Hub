@@ -11,8 +11,25 @@ export type ActivityAction =
   | 'embedded_launch'
   | 'copy_link'
   | 'profile_update'
-  | 'notification_read';
+  | 'notification_read'
+  | 'biometric_unlock';
 export type SessionStatus = 'active' | 'completed' | 'instant';
+export type NotificationTargetMode = 'all' | 'targeted';
+
+export const DEFAULT_PRODUCTION_LINES = [
+  'خط المبرد الصحراوي',
+  'خط الميكروويف',
+  'الجودة',
+  'الصيانة',
+  'الهندسة الصناعية',
+  'المخازن واللوجستيات',
+] as const;
+
+export const DEFAULT_SHIFTS = [
+  'الوردية الصباحية',
+  'الوردية المسائية',
+  'الوردية الليلية',
+] as const;
 
 export const SCHEMA_LIMITS = {
   ID_REGEX: /^[a-zA-Z0-9_-]+$/,
@@ -42,6 +59,7 @@ export const SCHEMA_LIMITS = {
   MAX_SESSION_SECONDS: 28800,
   NOTIF_TITLE_MAX: 120,
   NOTIF_BODY_MAX: 1000,
+  TARGET_ITEMS_MAX: 10,
 } as const;
 
 export interface AppItem {
@@ -81,6 +99,7 @@ export interface UserProfile {
   totalDurationSeconds?: number;
   adminNotes?: string;
   customFields?: Record<string, string>;
+  biometricEnabled?: boolean;
   lastActiveAt?: Timestamp | null;
   createdAt?: Timestamp | null;
 }
@@ -110,8 +129,27 @@ export interface BroadcastNotification {
   targetAppUrl: string;
   targetAppTitle: string;
   senderName: string;
+  targetMode?: NotificationTargetMode;
+  targetLines?: string[];
+  targetShifts?: string[];
   isActive: boolean;
   createdAt?: Timestamp | null;
+}
+
+export interface NotificationReadReceipt {
+  userId: string;
+  notificationId: string;
+  readAt?: Timestamp | null;
+}
+
+export interface BiometricDevice {
+  id: string;
+  credentialId: string;
+  deviceName: string;
+  platformInfo: string;
+  enabled: boolean;
+  createdAt?: Timestamp | null;
+  lastUsedAt?: Timestamp | null;
 }
 
 export interface ActivityLog {
@@ -158,4 +196,5 @@ export const ACTIVITY_ACTION_LABELS: Record<ActivityAction, string> = {
   copy_link: 'نسخ رابط الأداة',
   profile_update: 'تحديث بيانات الحساب',
   notification_read: 'قراءة توجيه إداري',
+  biometric_unlock: 'دخول بيومتري بالبصمة / الوجه',
 };

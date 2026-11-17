@@ -4,6 +4,7 @@ import { AccessGateView } from './components/AccessGateView';
 import { AdminConsole } from './components/AdminConsole';
 import { AppsCatalogView } from './components/AppsCatalogView';
 import { AuthModal } from './components/AuthModal';
+import { BiometricLockView } from './components/BiometricLockView';
 import { FreshLogo } from './components/FreshLogo';
 import { NotificationsView } from './components/NotificationsView';
 import { OfflineIndicator } from './components/OfflineIndicator';
@@ -20,6 +21,7 @@ const PlatformShell: React.FC = () => {
     isAdmin,
     isVerified,
     isApproved,
+    biometricLocked,
     pendingUsersCount,
     userProfile,
     user,
@@ -74,6 +76,15 @@ const PlatformShell: React.FC = () => {
     return (
       <>
         <AccessGateView theme={theme} onToggleTheme={toggleTheme} />
+        <OfflineIndicator />
+      </>
+    );
+  }
+
+  if (biometricLocked) {
+    return (
+      <>
+        <BiometricLockView theme={theme} onToggleTheme={toggleTheme} />
         <OfflineIndicator />
       </>
     );

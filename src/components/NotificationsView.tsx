@@ -4,6 +4,7 @@ import { usePlatform } from '../context/PlatformContext';
 import { OWNER_INFO } from '../data/defaultApps';
 import { NOTIFICATION_TYPE_LABELS } from '../types/platform';
 import { canUseBrowserNotifications, requestNotificationPermission } from '../utils/device';
+import { describeNotificationAudience } from '../utils/notifications';
 
 interface NotificationsViewProps {
   onOpenAuth: () => void;
@@ -12,7 +13,7 @@ interface NotificationsViewProps {
 export const NotificationsView: React.FC<NotificationsViewProps> = ({ onOpenAuth }) => {
   const {
     isVerified,
-    notifications,
+    visibleNotifications,
     readNotificationIds,
     unreadCount,
     markNotificationRead,
@@ -63,7 +64,7 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({ onOpenAuth
     );
   }
 
-  const activeNotifications = notifications.filter((n) => n.isActive);
+  const activeNotifications = visibleNotifications;
 
   return (
     <div className="max-w-4xl mx-auto space-y-6 pb-8">
@@ -178,6 +179,12 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({ onOpenAuth
                       )}
                       <span>{notif.title}</span>
                     </h3>
+
+                    {notif.targetMode === 'targeted' && (
+                      <p className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">
+                        موجه إلى: {describeNotificationAudience(notif)}
+                      </p>
+                    )}
 
                     <p className="text-sm text-zinc-600 dark:text-zinc-300 leading-relaxed whitespace-pre-line">
                       {notif.body}

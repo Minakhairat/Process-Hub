@@ -36,6 +36,7 @@ type EditorTarget =
   | { kind: 'new' };
 
 const QUICK_CUSTOM_KEYS = [
+  'خط الإنتاج',
   'الوردية',
   'خط الإنتاج الفرعي',
   'المشرف المباشر',

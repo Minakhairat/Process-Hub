@@ -200,6 +200,10 @@
           "type": "object",
           "description": "Flexible custom key-value attributes assigned to the account by the administrator."
         },
+        "biometricEnabled": {
+          "type": "boolean",
+          "description": "Whether the user opted into mobile/device biometric authentication lock."
+        },
         "lastActiveAt": {
           "type": "string",
           "format": "date-time",
@@ -369,6 +373,19 @@
           "minLength": 2,
           "maxLength": 100
         },
+        "targetMode": {
+          "type": "string",
+          "enum": ["all", "targeted"],
+          "description": "Whether the notification targets everyone or specific lines/shifts."
+        },
+        "targetLines": {
+          "type": "array",
+          "description": "Optional list of target production lines or departments."
+        },
+        "targetShifts": {
+          "type": "array",
+          "description": "Optional list of target work shifts."
+        },
         "isActive": {
           "type": "boolean"
         },
@@ -387,6 +404,54 @@
         "senderName",
         "isActive",
         "createdAt"
+      ]
+    },
+    "BiometricDevice": {
+      "title": "BiometricDevice",
+      "description": "Registered WebAuthn biometric device passkey bound optionally by an approved user.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "credentialId": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 512
+        },
+        "deviceName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100
+        },
+        "platformInfo": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "lastUsedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "credentialId",
+        "deviceName",
+        "platformInfo",
+        "enabled",
+        "createdAt",
+        "lastUsedAt"
       ]
     },
     "ActivityLog": {
@@ -428,7 +493,7 @@
         },
         "action": {
           "type": "string",
-          "enum": ["launch", "embedded_launch", "copy_link", "profile_update", "notification_read"]
+          "enum": ["launch", "embedded_launch", "copy_link", "profile_update", "notification_read", "biometric_unlock"]
         },
         "details": {
           "type": "string",
@@ -477,6 +542,10 @@
     "/users/{userId}/readNotifications/{notificationId}": {
       "schema": { "$ref": "#/entities/ReadNotificationReceipt" },
       "description": "Subcollection tracking which broadcast notifications a user has acknowledged."
+    },
+    "/users/{userId}/biometricDevices/{deviceId}": {
+      "schema": { "$ref": "#/entities/BiometricDevice" },
+      "description": "Optional WebAuthn biometric device credentials registered by the user."
     },
     "/notifications/{notificationId}": {
       "schema": { "$ref": "#/entities/BroadcastNotification" },

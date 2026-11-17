@@ -5,6 +5,7 @@ import {
   ClipboardCheck,
   Clock,
   Edit3,
+  Fingerprint,
   Lock,
   LogOut,
   MessageCircle,
@@ -32,7 +33,9 @@ export const AccessGateView: React.FC<AccessGateViewProps> = ({ theme, onToggleT
     isVerified,
     isProfileComplete,
     profileLoading,
+    localBiometricBinding,
     signInWithGoogle,
+    signInWithBiometricPrompt,
     resendVerification,
     refreshAuthUser,
     signOutUser,
@@ -82,6 +85,17 @@ export const AccessGateView: React.FC<AccessGateViewProps> = ({ theme, onToggleT
       }
     } finally {
       setBusy(false);
+    }
+  };
+
+  const handleBiometricSignIn = async () => {
+    setErrorMsg('');
+    setInfoMsg('');
+    setBusy(true);
+    const res = await signInWithBiometricPrompt();
+    setBusy(false);
+    if (!res.ok) {
+      setErrorMsg(res.error || 'تعذر إتمام الدخول بالبصمة.');
     }
   };
 
@@ -223,15 +237,31 @@ export const AccessGateView: React.FC<AccessGateViewProps> = ({ theme, onToggleT
                 </p>
               )}
 
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => void handleGoogleSignIn()}
-                className="w-full min-h-[48px] inline-flex items-center justify-center gap-3 rounded-xl bg-red-600 px-5 py-3 text-sm font-bold text-white hover:bg-red-700 transition-colors cursor-pointer disabled:opacity-60"
-              >
-                <UserCheck className="h-5 w-5" />
-                <span>{busy ? 'جاري فتح نافذة Google...' : 'تسجيل الدخول بحساب Google (Gmail)'}</span>
-              </button>
+              <div className="space-y-3">
+                {localBiometricBinding && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void handleBiometricSignIn()}
+                    className="w-full min-h-[48px] inline-flex items-center justify-center gap-3 rounded-xl bg-zinc-900 dark:bg-zinc-800 border border-zinc-800 dark:border-zinc-700 px-5 py-3 text-sm font-bold text-white hover:bg-zinc-800 dark:hover:bg-zinc-700 transition-colors cursor-pointer disabled:opacity-60"
+                  >
+                    <Fingerprint className="h-5 w-5 text-emerald-400 shrink-0" />
+                    <span className="truncate">
+                      الدخول السريع بالبصمة / الوجه ({localBiometricBinding.displayName})
+                    </span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void handleGoogleSignIn()}
+                  className="w-full min-h-[48px] inline-flex items-center justify-center gap-3 rounded-xl bg-red-600 px-5 py-3 text-sm font-bold text-white hover:bg-red-700 transition-colors cursor-pointer disabled:opacity-60"
+                >
+                  <UserCheck className="h-5 w-5 shrink-0" />
+                  <span>{busy ? 'جاري التحقق والدخول...' : 'تسجيل الدخول بحساب Google (Gmail)'}</span>
+                </button>
+              </div>
             </>
           )}
 

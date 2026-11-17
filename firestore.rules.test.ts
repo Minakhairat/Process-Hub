@@ -121,6 +121,7 @@ export function verifyRulesStructure() {
     rules.includes('isValidUserProfile(incoming())'),
     rules.includes('isValidInvitedUser(incoming())'),
     rules.includes('isValidBroadcastNotification(incoming())'),
+    rules.includes('isValidBiometricDevice(incoming())'),
     rules.includes('isValidActivityLog(incoming())'),
   ];
   return checks.every(Boolean);

@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  GoogleAuthProvider,
   createUserWithEmailAndPassword,
   onAuthStateChanged,
   sendEmailVerification,
@@ -11,6 +12,7 @@ import {
 } from 'firebase/auth';
 import {
   collection,
+  collectionGroup,
   deleteDoc,
   doc,
   getDoc,
@@ -34,13 +36,28 @@ import {
   type AppCategory,
   type AppItem,
   type ApprovalStatus,
+  type BiometricDevice,
   type BroadcastNotification,
   type IconType,
   type InvitedUser,
+  type NotificationReadReceipt,
+  type NotificationTargetMode,
   type NotificationType,
   type UserProfile,
   type UserRole,
 } from '../types/platform';
+import {
+  getLocalBiometricBinding,
+  isPlatformBiometricAvailable,
+  isWebAuthnSupported,
+  markBiometricSessionUnlocked,
+  registerDeviceBiometricPasskey,
+  saveLocalBiometricBinding,
+  setBiometricLockState,
+  shouldRequireBiometricUnlock,
+  verifyDeviceBiometricPasskey,
+  type LocalBiometricBinding,
+} from '../utils/biometric';
 import {
   detectPlatformInfo,
   dispatchDeviceNotification,
@@ -48,6 +65,7 @@ import {
   sanitizeEmailKey,
   sanitizeSlug,
 } from '../utils/device';
+import { doesUserMatchNotification } from '../utils/notifications';
 
 export interface AppFormInput {
   id?: string;
@@ -71,6 +89,9 @@ export interface NotificationFormInput {
   type: NotificationType;
   targetAppUrl: string;
   targetAppTitle: string;
+  targetMode: NotificationTargetMode;
+  targetLines: string[];
+  targetShifts: string[];
 }
 
 export interface ProfileUpdateInput {
@@ -123,7 +144,9 @@ interface PlatformContextValue {
   appsFromFirestore: boolean;
   appsLoading: boolean;
   notifications: BroadcastNotification[];
+  visibleNotifications: BroadcastNotification[];
   readNotificationIds: Set<string>;
+  adminReadReceipts: NotificationReadReceipt[];
   unreadCount: number;
   latestToast: BroadcastNotification | null;
   dismissLatestToast: () => void;
@@ -131,7 +154,18 @@ interface PlatformContextValue {
   invitedUsers: InvitedUser[];
   activityLogs: ActivityLog[];
   activeToolSession: ActiveToolSession | null;
+  biometricSupported: boolean;
+  biometricAvailable: boolean;
+  biometricDevices: BiometricDevice[];
+  localBiometricBinding: LocalBiometricBinding | null;
+  biometricLocked: boolean;
   signInWithGoogle: () => Promise<void>;
+  signInWithBiometricPrompt: () => Promise<{ ok: boolean; error?: string }>;
+  registerBiometricOnThisDevice: (deviceName?: string) => Promise<{ ok: boolean; error?: string }>;
+  toggleBiometricLockOnStart: (enabled: boolean) => void;
+  lockWithBiometrics: () => void;
+  unlockWithBiometrics: () => Promise<{ ok: boolean; error?: string }>;
+  removeBiometricDevice: (deviceId: string) => Promise<void>;
   signInWithEmail: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>;
   registerWithEmail: (
     name: string,
@@ -151,7 +185,10 @@ interface PlatformContextValue {
   logInstantAction: (
     appId: string,
     appTitle: string,
-    action: Extract<ActivityAction, 'copy_link' | 'profile_update' | 'notification_read'>,
+    action: Extract<
+      ActivityAction,
+      'copy_link' | 'profile_update' | 'notification_read' | 'biometric_unlock'
+    >,
     details: string
   ) => void;
   markNotificationRead: (notificationId: string) => Promise<void>;
@@ -194,17 +231,26 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [adminAppsReady, setAdminAppsReady] = useState(false);
   const [notifications, setNotifications] = useState<BroadcastNotification[]>([]);
   const [readNotificationIds, setReadNotificationIds] = useState<Set<string>>(new Set());
+  const [adminReadReceipts, setAdminReadReceipts] = useState<NotificationReadReceipt[]>([]);
   const [latestToast, setLatestToast] = useState<BroadcastNotification | null>(null);
   const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
   const [invitedUsers, setInvitedUsers] = useState<InvitedUser[]>([]);
   const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
   const [activeToolSession, setActiveToolSession] = useState<ActiveToolSession | null>(null);
+  const [biometricSupported] = useState(() => isWebAuthnSupported());
+  const [biometricAvailable, setBiometricAvailable] = useState(false);
+  const [biometricDevices, setBiometricDevices] = useState<BiometricDevice[]>([]);
+  const [localBiometricBinding, setLocalBiometricBinding] = useState<LocalBiometricBinding | null>(
+    () => getLocalBiometricBinding()
+  );
+  const [biometricLocked, setBiometricLocked] = useState(false);
 
   const seenNotifIdsRef = useRef<Set<string>>(new Set());
   const initialNotifLoadRef = useRef(true);
   const seededOnceRef = useRef(false);
   const activeSessionRef = useRef<ActiveToolSession | null>(null);
   const wentAwayRef = useRef(false);
+  const userProfileRef = useRef<UserProfile | null>(null);
 
   const isVerified = Boolean(user && user.emailVerified);
   const isAdmin = Boolean(
@@ -288,17 +334,34 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     await commitSessionDuration(current, true);
   }, [commitSessionDuration, persistSessionState]);
 
+  // Check device biometric hardware availability on mount
+  useEffect(() => {
+    let active = true;
+    void isPlatformBiometricAvailable().then((available) => {
+      if (active) setBiometricAvailable(available);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
   // 1. Auth State Listener
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (firebaseUser) => {
       setUser(firebaseUser);
       setAuthReady(true);
-      if (!firebaseUser) {
+      if (firebaseUser) {
+        setBiometricLocked(shouldRequireBiometricUnlock(firebaseUser.uid));
+      } else {
+        setBiometricLocked(false);
         setUserProfile(null);
+        userProfileRef.current = null;
         setProfileLoading(false);
         setFirestoreApps([]);
         setNotifications([]);
         setReadNotificationIds(new Set());
+        setAdminReadReceipts([]);
+        setBiometricDevices([]);
         setAllUsers([]);
         setInvitedUsers([]);
         setActivityLogs([]);
@@ -530,7 +593,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       (snap) => {
         if (snap.exists()) {
           const raw = snap.data() as Partial<UserProfile>;
-          setUserProfile({
+          const profileObj: UserProfile = {
             uid: raw.uid || user.uid,
             email: raw.email || user.email || '',
             displayName: raw.displayName || user.displayName || 'مستخدم',
@@ -548,9 +611,12 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             totalDurationSeconds: raw.totalDurationSeconds ?? 0,
             adminNotes: raw.adminNotes || '',
             customFields: raw.customFields || {},
+            biometricEnabled: Boolean(raw.biometricEnabled),
             lastActiveAt: raw.lastActiveAt ?? null,
             createdAt: raw.createdAt ?? null,
-          });
+          };
+          userProfileRef.current = profileObj;
+          setUserProfile(profileObj);
           setProfileLoading(false);
         }
       },
@@ -668,8 +734,10 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           for (const n of list) {
             if (n.isActive && !seenNotifIdsRef.current.has(n.id)) {
               seenNotifIdsRef.current.add(n.id);
-              setLatestToast(n);
-              void dispatchDeviceNotification(n.title, n.body, n.targetAppUrl || undefined);
+              if (doesUserMatchNotification(userProfileRef.current, n, isAdmin)) {
+                setLatestToast(n);
+                void dispatchDeviceNotification(n.title, n.body, n.targetAppUrl || undefined);
+              }
               break;
             }
           }
@@ -708,12 +776,47 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return () => unsubRead();
   }, [authReady, user, isVerified, isApproved, userProfile]);
 
-  // 6. Admin-Only Listeners: All Users, Invited Users & Activity Logs
+  // 5c. User's Registered Biometric Devices Listener
+  useEffect(() => {
+    if (!authReady || !user || !isVerified || !isApproved || !userProfile) {
+      setBiometricDevices([]);
+      return;
+    }
+
+    const bioCol = collection(db, 'users', user.uid, 'biometricDevices');
+    const unsubBio = onSnapshot(
+      bioCol,
+      (snapshot) => {
+        const list = snapshot.docs.map((d) => d.data() as BiometricDevice);
+        list.sort((a, b) => {
+          const ta = a.lastUsedAt?.toMillis?.() ?? 0;
+          const tb = b.lastUsedAt?.toMillis?.() ?? 0;
+          return tb - ta;
+        });
+        setBiometricDevices(list);
+
+        const local = getLocalBiometricBinding();
+        if (local && local.uid === user.uid && !list.some((d) => d.id === local.deviceId)) {
+          saveLocalBiometricBinding(null);
+          setLocalBiometricBinding(null);
+          setBiometricLocked(false);
+        }
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.LIST, `users/${user.uid}/biometricDevices`);
+      }
+    );
+
+    return () => unsubBio();
+  }, [authReady, user, isVerified, isApproved, userProfile]);
+
+  // 6. Admin-Only Listeners: All Users, Invited Users, Activity Logs & All Read Receipts
   useEffect(() => {
     if (!isAdmin) {
       setAllUsers([]);
       setInvitedUsers([]);
       setActivityLogs([]);
+      setAdminReadReceipts([]);
       return;
     }
 
@@ -740,6 +843,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             totalDurationSeconds: raw.totalDurationSeconds ?? 0,
             adminNotes: raw.adminNotes || '',
             customFields: raw.customFields || {},
+            biometricEnabled: Boolean(raw.biometricEnabled),
             lastActiveAt: raw.lastActiveAt ?? null,
             createdAt: raw.createdAt ?? null,
           } satisfies UserProfile;
@@ -788,16 +892,194 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }
     );
 
+    const unsubAllReads = onSnapshot(
+      collectionGroup(db, 'readNotifications'),
+      (snapshot) => {
+        const receipts: NotificationReadReceipt[] = snapshot.docs.map((d) => {
+          const raw = d.data() as { notificationId?: string; readAt?: NotificationReadReceipt['readAt'] };
+          return {
+            userId: d.ref.parent.parent?.id || '',
+            notificationId: raw.notificationId || d.id,
+            readAt: raw.readAt ?? null,
+          };
+        });
+        setAdminReadReceipts(receipts);
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.LIST, 'readNotifications');
+      }
+    );
+
     return () => {
       unsubUsers();
       unsubInvited();
       unsubLogs();
+      unsubAllReads();
     };
   }, [isAdmin]);
 
   // Actions
   const signInWithGoogle = async () => {
     await signInWithPopup(auth, googleProvider);
+  };
+
+  const signInWithBiometricPrompt = async (): Promise<{ ok: boolean; error?: string }> => {
+    const binding = getLocalBiometricBinding();
+    if (!binding) {
+      return { ok: false, error: 'لا يوجد جهاز مربوط بالبصمة على هذا المتصفح حالياً.' };
+    }
+    const verified = await verifyDeviceBiometricPasskey(binding.credentialId);
+    if (!verified.ok) {
+      return verified;
+    }
+
+    try {
+      const hintedProvider = new GoogleAuthProvider();
+      hintedProvider.setCustomParameters({ login_hint: binding.email });
+      await signInWithPopup(auth, hintedProvider);
+      markBiometricSessionUnlocked();
+      setBiometricLocked(false);
+      return { ok: true };
+    } catch (err) {
+      const code = (err as { code?: string })?.code || '';
+      if (code === 'auth/popup-closed-by-user') {
+        return { ok: false, error: 'تم التحقق من البصمة، لكن أُغلقت نافذة تأكيد Google قبل الإتمام.' };
+      }
+      return { ok: false, error: 'تم التحقق من البصمة، يرجى إكمال تأكيد حساب Google للدخول.' };
+    }
+  };
+
+  const registerBiometricOnThisDevice = async (
+    deviceName?: string
+  ): Promise<{ ok: boolean; error?: string }> => {
+    if (!user || !isVerified || !isApproved) {
+      return { ok: false, error: 'يجب أن يكون الحساب مفعّلاً ومعتمداً لتسجيل البصمة.' };
+    }
+    const reg = await registerDeviceBiometricPasskey({
+      uid: user.uid,
+      email: user.email || '',
+      displayName: userProfile?.displayName || user.displayName || user.email || 'عضو',
+      deviceName,
+    });
+    if (!reg.ok) {
+      return reg;
+    }
+
+    const deviceRef = doc(db, 'users', user.uid, 'biometricDevices', reg.deviceId);
+    try {
+      await setDoc(deviceRef, {
+        id: reg.deviceId,
+        credentialId: reg.credentialId,
+        deviceName: reg.deviceName,
+        platformInfo: reg.platformInfo,
+        enabled: true,
+        createdAt: serverTimestamp(),
+        lastUsedAt: serverTimestamp(),
+      });
+      await updateDoc(doc(db, 'users', user.uid), {
+        biometricEnabled: true,
+        platformInfo: reg.platformInfo,
+        lastActiveAt: serverTimestamp(),
+      });
+
+      const newBinding: LocalBiometricBinding = {
+        uid: user.uid,
+        email: user.email || '',
+        displayName: userProfile?.displayName || user.displayName || 'مستخدم',
+        deviceId: reg.deviceId,
+        credentialId: reg.credentialId,
+        deviceName: reg.deviceName,
+        platformInfo: reg.platformInfo,
+        lockOnStart: true,
+        registeredAt: Date.now(),
+      };
+      saveLocalBiometricBinding(newBinding);
+      setLocalBiometricBinding(newBinding);
+      markBiometricSessionUnlocked();
+      setBiometricLocked(false);
+      return { ok: true };
+    } catch (error) {
+      handleFirestoreError(
+        error,
+        OperationType.CREATE,
+        `users/${user.uid}/biometricDevices/${reg.deviceId}`
+      );
+      return { ok: false, error: 'تعذر حفظ بيانات الجهاز البيومتري.' };
+    }
+  };
+
+  const toggleBiometricLockOnStart = (enabled: boolean) => {
+    const current = getLocalBiometricBinding();
+    if (!current) return;
+    const updated: LocalBiometricBinding = { ...current, lockOnStart: enabled };
+    saveLocalBiometricBinding(updated);
+    setLocalBiometricBinding(updated);
+  };
+
+  const lockWithBiometrics = () => {
+    const current = getLocalBiometricBinding();
+    if (!current || !user || current.uid !== user.uid) return;
+    setBiometricLockState(true);
+    setBiometricLocked(true);
+  };
+
+  const unlockWithBiometrics = async (): Promise<{ ok: boolean; error?: string }> => {
+    const current = getLocalBiometricBinding();
+    if (!current || !user || current.uid !== user.uid) {
+      setBiometricLocked(false);
+      return { ok: true };
+    }
+    const res = await verifyDeviceBiometricPasskey(current.credentialId);
+    if (!res.ok) {
+      return res;
+    }
+
+    markBiometricSessionUnlocked();
+    setBiometricLocked(false);
+
+    try {
+      await updateDoc(doc(db, 'users', user.uid, 'biometricDevices', current.deviceId), {
+        platformInfo: detectPlatformInfo().slice(0, 100),
+        lastUsedAt: serverTimestamp(),
+      });
+    } catch {
+      // Non-fatal if device doc was cleaned up
+    }
+
+    logInstantAction(
+      'platform-biometric',
+      current.deviceName,
+      'biometric_unlock',
+      `فتح الجلسة بالبصمة / الوجه عبر ${current.deviceName}`
+    );
+    return { ok: true };
+  };
+
+  const removeBiometricDevice = async (deviceId: string) => {
+    if (!user || !isVerified) return;
+    try {
+      await deleteDoc(doc(db, 'users', user.uid, 'biometricDevices', deviceId));
+      const remaining = biometricDevices.filter((d) => d.id !== deviceId);
+      const local = getLocalBiometricBinding();
+      if (local && local.deviceId === deviceId) {
+        saveLocalBiometricBinding(null);
+        setLocalBiometricBinding(null);
+        setBiometricLocked(false);
+      }
+      if (remaining.length === 0) {
+        await updateDoc(doc(db, 'users', user.uid), {
+          biometricEnabled: false,
+          platformInfo: detectPlatformInfo().slice(0, 100),
+          lastActiveAt: serverTimestamp(),
+        });
+      }
+    } catch (error) {
+      handleFirestoreError(
+        error,
+        OperationType.DELETE,
+        `users/${user.uid}/biometricDevices/${deviceId}`
+      );
+    }
   };
 
   const signInWithEmail = async (email: string, password: string) => {
@@ -881,7 +1163,10 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     (
       appId: string,
       appTitle: string,
-      action: Extract<ActivityAction, 'copy_link' | 'profile_update' | 'notification_read'>,
+      action: Extract<
+        ActivityAction,
+        'copy_link' | 'profile_update' | 'notification_read' | 'biometric_unlock'
+      >,
       details: string
     ) => {
       if (!user || !isVerified || !isApproved) return;
@@ -1221,7 +1506,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const markAllNotificationsRead = async () => {
     if (!user || !isVerified || !isApproved) return;
-    const unread = notifications.filter((n) => n.isActive && !readNotificationIds.has(n.id));
+    const unread = visibleNotifications.filter((n) => !readNotificationIds.has(n.id));
     for (const n of unread) {
       await markNotificationRead(n.id);
     }
@@ -1301,6 +1586,18 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (!user || !isAdmin) return;
     const notifId = `notif_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
     const ref = doc(db, 'notifications', notifId);
+    const cleanLines = input.targetLines
+      .map((s) => s.trim().slice(0, 100))
+      .filter(Boolean)
+      .slice(0, SCHEMA_LIMITS.TARGET_ITEMS_MAX);
+    const cleanShifts = input.targetShifts
+      .map((s) => s.trim().slice(0, 100))
+      .filter(Boolean)
+      .slice(0, SCHEMA_LIMITS.TARGET_ITEMS_MAX);
+    const effectiveMode: NotificationTargetMode =
+      input.targetMode === 'targeted' && (cleanLines.length > 0 || cleanShifts.length > 0)
+        ? 'targeted'
+        : 'all';
 
     try {
       await setDoc(ref, {
@@ -1311,6 +1608,9 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         targetAppUrl: input.targetAppUrl.trim().slice(0, SCHEMA_LIMITS.APP_URL_MAX),
         targetAppTitle: input.targetAppTitle.trim().slice(0, 100),
         senderName: `${OWNER_INFO.nameAr} — مدير إدارة العمليات`,
+        targetMode: effectiveMode,
+        targetLines: effectiveMode === 'targeted' ? cleanLines : [],
+        targetShifts: effectiveMode === 'targeted' ? cleanShifts : [],
         isActive: true,
         createdAt: serverTimestamp(),
       });
@@ -1347,9 +1647,15 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return DEFAULT_APPS;
   }, [isApproved, firestoreApps]);
 
+  const visibleNotifications = useMemo(() => {
+    return notifications.filter(
+      (n) => n.isActive && doesUserMatchNotification(userProfile, n, isAdmin)
+    );
+  }, [notifications, userProfile, isAdmin]);
+
   const unreadCount = useMemo(() => {
-    return notifications.filter((n) => n.isActive && !readNotificationIds.has(n.id)).length;
-  }, [notifications, readNotificationIds]);
+    return visibleNotifications.filter((n) => !readNotificationIds.has(n.id)).length;
+  }, [visibleNotifications, readNotificationIds]);
 
   const pendingUsersCount = useMemo(() => {
     return allUsers.filter((u) => u.role !== 'admin' && u.approvalStatus === 'pending').length;
@@ -1369,7 +1675,9 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     appsFromFirestore,
     appsLoading,
     notifications,
+    visibleNotifications,
     readNotificationIds,
+    adminReadReceipts,
     unreadCount,
     latestToast,
     dismissLatestToast: () => setLatestToast(null),
@@ -1377,7 +1685,18 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     invitedUsers,
     activityLogs,
     activeToolSession,
+    biometricSupported,
+    biometricAvailable,
+    biometricDevices,
+    localBiometricBinding,
+    biometricLocked,
     signInWithGoogle,
+    signInWithBiometricPrompt,
+    registerBiometricOnThisDevice,
+    toggleBiometricLockOnStart,
+    lockWithBiometrics,
+    unlockWithBiometrics,
+    removeBiometricDevice,
     signInWithEmail,
     registerWithEmail,
     resendVerification,

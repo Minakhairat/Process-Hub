@@ -1,5 +1,14 @@
 import React, { useState } from 'react';
-import { CheckCircle2, Lock, Mail, RefreshCw, ShieldCheck, UserCheck, X } from 'lucide-react';
+import {
+  CheckCircle2,
+  Fingerprint,
+  Lock,
+  Mail,
+  RefreshCw,
+  ShieldCheck,
+  UserCheck,
+  X,
+} from 'lucide-react';
 import { usePlatform } from '../context/PlatformContext';
 import { OWNER_INFO } from '../data/defaultApps';
 import { FreshLogo } from './FreshLogo';
@@ -13,7 +22,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   const {
     user,
     isVerified,
+    localBiometricBinding,
     signInWithGoogle,
+    signInWithBiometricPrompt,
     signInWithEmail,
     registerWithEmail,
     resendVerification,
@@ -162,6 +173,31 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
           </div>
         ) : (
           <div className="mt-5 space-y-5">
+            {localBiometricBinding && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={async () => {
+                  setErrorMsg('');
+                  setInfoMsg('');
+                  setBusy(true);
+                  const res = await signInWithBiometricPrompt();
+                  setBusy(false);
+                  if (res.ok) {
+                    onClose();
+                  } else {
+                    setErrorMsg(res.error || 'تعذر الدخول بالبصمة.');
+                  }
+                }}
+                className="w-full min-h-[46px] inline-flex items-center justify-center gap-3 rounded-xl bg-zinc-900 dark:bg-zinc-800 border border-zinc-800 dark:border-zinc-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-zinc-800 transition-colors cursor-pointer disabled:opacity-60"
+              >
+                <Fingerprint className="h-4 w-4 text-emerald-400 shrink-0" />
+                <span className="truncate">
+                  دخول بالبصمة / الوجه ({localBiometricBinding.displayName})
+                </span>
+              </button>
+            )}
+
             {/* Primary 1-Click Google Email Login */}
             <button
               type="button"
